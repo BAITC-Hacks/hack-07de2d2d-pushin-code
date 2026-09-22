@@ -1,0 +1,31 @@
+# Append to the host's existing /etc/caddy/Caddyfile — one site block, nothing else touched.
+# Works next to the production S-Munai blocks: Caddy matches a named host before the bare :80
+# catch-all, so the production site and CRM keep serving exactly as before.
+#
+#   sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%F-%H%M)
+#   sudo tee -a /etc/caddy/Caddyfile < infra/caddy-site.snippet
+#   sudo caddy validate --config /etc/caddy/Caddyfile   # refuses to apply a broken config
+#   sudo systemctl reload caddy                          # graceful, keeps live connections
+#
+# Rollback:  sudo cp /etc/caddy/Caddyfile.bak.<stamp> /etc/caddy/Caddyfile && sudo systemctl reload caddy
+#
+# The host name below needs no DNS record: sslip.io resolves <ip-with-dashes>.sslip.io to that IP,
+# so Let's Encrypt issues a real certificate for it. Swap for a real subdomain if you have one.
+
+89-126-192-65.sslip.io {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8100 {
+			flush_interval -1          # SSE: stream immediately, do not buffer
+		}
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:8100
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3100
+	}
+}

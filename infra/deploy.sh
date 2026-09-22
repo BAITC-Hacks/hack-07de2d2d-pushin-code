@@ -6,7 +6,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 set -a; . ./.env; set +a
 : "${DOMAIN:?DOMAIN missing in .env}"
 
-git pull --ff-only
+# When invoked from the bare repo's post-receive hook the working tree is already
+# at the pushed commit — pulling would fail (no upstream configured).
+if [ "${DEPLOY_FROM_HOOK:-0}" != "1" ]; then
+  git pull --ff-only
+fi
 docker compose -f infra/docker-compose.yml --env-file .env up -d --build --remove-orphans
 
 for i in $(seq 1 40); do
