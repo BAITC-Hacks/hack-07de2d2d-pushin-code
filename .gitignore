@@ -1,0 +1,10 @@
+.env
+.env.*
+.claude/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+brag-output*/
