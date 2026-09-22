@@ -40,18 +40,21 @@ Namecheap. Если нужен www, сначала поправить DNS, по�
 
 ## Один раз, до 23.09
 
-1. **Ключ для беспарольного входа** (иначе каждый деплой — ввод пароля руками):
-   `ssh-copy-id -i ~/.ssh/id_ed25519.pub master@89.126.192.65`
-2. **Docker + compose plugin**: `ssh master@89.126.192.65 'bash -s' < infra/server-setup.sh`.
-   Скрипт идемпотентный: ставит Docker, добавляет пользователя в группу `docker`, открывает
-   80/443 в ufw (они и так заняты Caddy, но правило не мешает), готовит `/srv/hackalem.git`
-   с хуком `post-receive`.
-3. **`.env` на сервере**: `/srv/hackalem/.env` из `infra/.env.example`:
-   `DOMAIN=pushin.codes`, `DEPLOY_COMPOSE_FILE=infra/docker-compose.hosted.yml`, `OPENAI_API_KEY=…`
+1. ~~**Ключ для беспарольного входа**~~ — **сделано 22.09.** В `~/.ssh/config` мастера есть
+   алиас `hackdeploy`. Если ставить заново: `ssh-copy-id -o PubkeyAuthentication=no
+   -o PreferredAuthentications=password -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519.pub master@…`
+   — без этих опций ssh перебирает все ключи и упирается в лимит попыток сервера.
+2. ~~**Docker + compose plugin**~~ — **сделано 22.09**: Docker 29.8.1, Compose v5.5.1,
+   `master` в группе `docker`, `/srv/hackalem.git` с хуком `post-receive` готов.
+   Повторный прогон: `ssh hackdeploy 'bash -s' < infra/server-setup.sh` (идемпотентный).
+3. **`.env` на сервере** — создан, но **`OPENAI_API_KEY` в нём заглушка**. Заменить, когда
+   организаторы выдадут токены: `ssh hackdeploy` → `nano /srv/hackalem/.env`.
+   Остальное на месте: `DOMAIN=pushin.codes`, `DEPLOY_COMPOSE_FILE=infra/docker-compose.hosted.yml`.
 4. ~~**Site-блок в Caddy**~~ — **сделано 22.09**, см. выше. Исходник блока — `caddy-site.snippet`.
-5. **Прогон на заглушке**: минимальные `backend/` (отдаёт `/health`) и `frontend/` (одна
-   страница) с Dockerfile → `docker compose -f infra/docker-compose.hosted.yml up -d --build`
-   → открыть `https://pushin.codes`. Это проверка TLS, проксирования и compose разом.
+5. ~~**Прогон на заглушке**~~ — **пройден 22.09** целиком, через `git push deploy`:
+   хук выкатил дерево, собрал образы, поднял контейнеры и дождался `/health`.
+   Снаружи отвечают `/` (фронт), `/health` → `{"ok": true}`, `/api/*`, `/_up`.
+   Заглушка лежит в `templates/smoke/`.
 6. **Проверить, что боевой S-Munai жив** после всех правок: `https://s-munai.kz` и
    `https://crm.s-munai.kz` открываются, `systemctl status caddy` — active.
 
@@ -62,9 +65,14 @@ Namecheap. Если нужен www, сначала поправить DNS, по�
 доступа сервера к приватному репозиторию организатора и от того, доживёт ли GitHub до площадки.
 
 ```bash
-git remote add deploy master@89.126.192.65:/srv/hackalem.git
+git remote add deploy hackdeploy:/srv/hackalem.git   # алиас уже в ~/.ssh/config мастера
 git push deploy main
 ```
+
+**Проверено 22.09.** Один нюанс, на который напоролись: `server-setup.sh` запускается под
+`sudo`, поэтому `git init --bare` создавал `objects/` и `refs/` от root внутри каталога,
+принадлежащего пользователю, и каждый push падал с `unable to create temporary object
+directory`. В скрипте `chown` теперь идёт **после** `git init`.
 
 Запасной путь — обычный `git pull` на сервере: тогда нужен доступ к приватному репозиторию
 (классический PAT в credential store; deploy key недоступен — прав администратора у нас нет).

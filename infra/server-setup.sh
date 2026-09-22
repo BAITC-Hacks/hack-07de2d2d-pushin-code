@@ -50,9 +50,12 @@ fi
 
 say "4/6 · directories"
 sudo mkdir -p "$APP_DIR" "$BARE_DIR"
+[ -d "$BARE_DIR/objects" ] || sudo git init --bare -q "$BARE_DIR"
+[ -d "$APP_DIR/.git" ] || sudo git -C "$APP_DIR" init -q
+# chown AFTER git init: the script runs under sudo, so git would otherwise leave
+# root-owned objects/ and refs/ inside a user-owned directory, and every push fails
+# with "unable to create temporary object directory".
 sudo chown -R "$TARGET_USER:$TARGET_USER" "$APP_DIR" "$BARE_DIR"
-[ -d "$BARE_DIR/objects" ] || git init --bare -q "$BARE_DIR"
-[ -d "$APP_DIR/.git" ] || git -C "$APP_DIR" init -q
 
 say "5/6 · post-receive hook"
 cat > "$BARE_DIR/hooks/post-receive" <<HOOK
