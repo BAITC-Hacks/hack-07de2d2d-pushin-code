@@ -11,7 +11,10 @@ set -a; . ./.env; set +a
 if [ "${DEPLOY_FROM_HOOK:-0}" != "1" ]; then
   git pull --ff-only
 fi
-docker compose -f infra/docker-compose.yml --env-file .env up -d --build --remove-orphans
+# A host that already serves 80/443 (like the production S-Munai box) sets
+# DEPLOY_COMPOSE_FILE=infra/docker-compose.hosted.yml in its .env.
+COMPOSE="${DEPLOY_COMPOSE_FILE:-infra/docker-compose.yml}"
+docker compose -f "$COMPOSE" --env-file .env up -d --build --remove-orphans
 
 for i in $(seq 1 40); do
   if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
@@ -20,5 +23,5 @@ for i in $(seq 1 40); do
   sleep 3
 done
 echo "✗ health check failed after 120s — last logs:"
-docker compose -f infra/docker-compose.yml logs --tail=50
+docker compose -f "$COMPOSE" logs --tail=50
 exit 1

@@ -9,11 +9,17 @@
 #
 # Rollback:  sudo cp /etc/caddy/Caddyfile.bak.<stamp> /etc/caddy/Caddyfile && sudo systemctl reload caddy
 #
-# The host name below needs no DNS record: sslip.io resolves <ip-with-dashes>.sslip.io to that IP,
-# so Let's Encrypt issues a real certificate for it. Swap for a real subdomain if you have one.
+# APPLIED on 22.09.2026 for pushin.codes (A record -> 89.126.192.65). Certificate issued by
+# Let's Encrypt, valid to 21.12.2026. Kept here as the source of truth for the block.
+# No DNS? <ip-with-dashes>.sslip.io resolves to that IP and works the same way.
 
-89-126-192-65.sslip.io {
+pushin.codes {
 	encode zstd gzip
+
+	# Liveness of Caddy and TLS, independent of the hackathon containers
+	handle /_up {
+		respond "caddy ok" 200
+	}
 
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8100 {
@@ -27,5 +33,9 @@
 
 	handle {
 		reverse_proxy 127.0.0.1:3100
+	}
+
+	handle_errors {
+		respond "HackAlem AI — приложение ещё не развёрнуто (upstream {err.status_code})" 503
 	}
 }

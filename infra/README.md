@@ -27,8 +27,16 @@
    боевые сайты продолжают работать без изменений. Перед правкой — бэкап конфига,
    после — `caddy validate` и `systemctl reload` (без разрыва соединений).
 
-Домена для хакатона не требуется: `89-126-192-65.sslip.io` резолвится в этот IP,
-и Let's Encrypt выдаёт на него настоящий сертификат.
+**Домен и TLS уже готовы (22.09).** `pushin.codes` куплен, A-запись → 89.126.192.65,
+site-блок добавлен в системный Caddyfile, сертификат Let's Encrypt выпущен (до 21.12.2026).
+Проверка живости, не зависящая от контейнеров: `https://pushin.codes/_up` → `caddy ok`.
+Пока контейнеров нет, корень отдаёт честную 503 с текстом. HTTP редиректит на HTTPS.
+
+`www.pushin.codes` **в сертификат не входит** — эта запись всё ещё смотрит на парковку
+Namecheap. Если нужен www, сначала поправить DNS, потом добавить имя в site-блок.
+
+Бэкап конфига перед правкой: `/etc/caddy/Caddyfile.bak.2026-09-22-132018`.
+Откат: `sudo cp /etc/caddy/Caddyfile.bak.2026-09-22-132018 /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 
 ## Один раз, до 23.09
 
@@ -38,11 +46,12 @@
    Скрипт идемпотентный: ставит Docker, добавляет пользователя в группу `docker`, открывает
    80/443 в ufw (они и так заняты Caddy, но правило не мешает), готовит `/srv/hackalem.git`
    с хуком `post-receive`.
-3. **`.env` на сервере**: `/srv/hackalem/.env` из `infra/.env.example` — `DOMAIN` и `OPENAI_API_KEY`.
-4. **Site-блок в Caddy**: по инструкции в шапке `caddy-site.snippet`.
+3. **`.env` на сервере**: `/srv/hackalem/.env` из `infra/.env.example`:
+   `DOMAIN=pushin.codes`, `DEPLOY_COMPOSE_FILE=infra/docker-compose.hosted.yml`, `OPENAI_API_KEY=…`
+4. ~~**Site-блок в Caddy**~~ — **сделано 22.09**, см. выше. Исходник блока — `caddy-site.snippet`.
 5. **Прогон на заглушке**: минимальные `backend/` (отдаёт `/health`) и `frontend/` (одна
    страница) с Dockerfile → `docker compose -f infra/docker-compose.hosted.yml up -d --build`
-   → открыть `https://89-126-192-65.sslip.io`. Это проверка TLS, проксирования и compose разом.
+   → открыть `https://pushin.codes`. Это проверка TLS, проксирования и compose разом.
 6. **Проверить, что боевой S-Munai жив** после всех правок: `https://s-munai.kz` и
    `https://crm.s-munai.kz` открываются, `systemctl status caddy` — active.
 

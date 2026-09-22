@@ -33,8 +33,9 @@ https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_C
   sudo apt-get -qq install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
-say "2/6 · docker group for $USER"
-sudo usermod -aG docker "$USER"
+TARGET_USER="${SUDO_USER:-$USER}"
+say "2/6 · docker group for $TARGET_USER"
+sudo usermod -aG docker "$TARGET_USER"
 echo "re-login required for the group to take effect in new shells"
 
 say "3/6 · firewall"
@@ -49,7 +50,7 @@ fi
 
 say "4/6 · directories"
 sudo mkdir -p "$APP_DIR" "$BARE_DIR"
-sudo chown -R "$USER:$USER" "$APP_DIR" "$BARE_DIR"
+sudo chown -R "$TARGET_USER:$TARGET_USER" "$APP_DIR" "$BARE_DIR"
 [ -d "$BARE_DIR/objects" ] || git init --bare -q "$BARE_DIR"
 [ -d "$APP_DIR/.git" ] || git -C "$APP_DIR" init -q
 
@@ -76,12 +77,13 @@ say "6/6 · next steps"
 cat <<TXT
 On your laptop, inside the repository clone:
 
-  git remote add deploy $USER@\$(hostname -I | awk '{print \$1}'):$BARE_DIR
+  git remote add deploy $TARGET_USER@\$(hostname -I | awk '{print \$1}'):$BARE_DIR
   git push deploy main
 
 Before the first deploy, create $APP_DIR/.env (see infra/.env.example):
 
-  DOMAIN=<ip-with-dashes>.sslip.io      # no domain needed: sslip.io resolves to the IP
+  DOMAIN=pushin.codes
+  DEPLOY_COMPOSE_FILE=infra/docker-compose.hosted.yml   # host already serves 80/443
   OPENAI_API_KEY=sk-...
 
 Then any 'git push deploy main' checks out and redeploys.
