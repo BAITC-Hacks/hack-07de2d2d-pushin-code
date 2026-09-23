@@ -1,0 +1,27 @@
+{
+  "project_root": "..",
+  "data": {
+    "inputs": {
+      "1": "Dataset HackAlemAI \u0434\u043b\u044f \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432 11.03.2023-28.02.2026 - turbine 1.csv",
+      "2": "Dataset HackAlemAI \u0434\u043b\u044f \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432 11.03.2023-28.02.2026 - turbine 2.csv"
+    },
+    "timezone": "Etc/GMT-5",
+    "timezone_note": "PROVISIONAL: fixed UTC+05:00 throughout the CSV history; source timezone is undocumented. Confirm before operational interpretation.",
+    "hourly_output": "data/processed/hourly.parquet",
+    "report_output": "reports/generated/data_quality.json"
+  },
+  "history": {
+    "origin_stride_hours": 6,
+    "issue_hour_utc": 19,
+    "horizon_hours": 48,
+    "max_lookback_hours": 168,
+    "required_recent_hours": 24,
+    "dataset_output": "data/processed/history_supervised.parquet"
+  },
+  "evaluation": {
+    "random_seed": 42,
+    "n_jobs": 4,
+    "final_train_cutoff": "2026-01-31T19:00:00Z",
+    "output_dir": "artifacts/csv_only"
+  }
+}

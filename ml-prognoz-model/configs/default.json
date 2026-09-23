@@ -1,0 +1,42 @@
+{
+  "project_root": "..",
+  "data": {
+    "inputs": {
+      "1": "Dataset HackAlemAI для участников 11.03.2023-28.02.2026 - turbine 1.csv",
+      "2": "Dataset HackAlemAI для участников 11.03.2023-28.02.2026 - turbine 2.csv"
+    },
+    "timezone": "Etc/GMT-5",
+    "timezone_note": "PROVISIONAL: fixed UTC+05:00 for the entire CSV. The source timezone is undocumented. Confirm before interpreting model accuracy.",
+    "hourly_output": "data/processed/hourly.parquet",
+    "report_output": "reports/generated/data_quality.json"
+  },
+  "weather": {
+    "source": "noaa_gfs",
+    "sites": [
+      {"turbine_id": "1", "latitude": 43.645150, "longitude": 78.535604},
+      {"turbine_id": "2", "latitude": 43.643198, "longitude": 78.538828}
+    ],
+    "start_origin": "2023-03-11T18:00:00Z",
+    "end_origin": "2026-01-30T18:00:00Z",
+    "horizon_hours": 48,
+    "publication_delay_hours": 6,
+    "sampling_stride_days": 3,
+    "max_workers": 8,
+    "cache_dir": "data/weather/cache",
+    "sampled_output": "data/weather/training_sampled.parquet",
+    "output": "data/weather/training.parquet"
+  },
+  "evaluation": {
+    "random_seed": 42,
+    "n_jobs": 4,
+    "output_dir": "artifacts/evaluation",
+    "final_train_cutoff": "2026-01-31T18:00:00Z"
+  },
+  "replay": {
+    "start_origin": "2026-01-31T18:00:00Z",
+    "end_origin": "2026-02-27T18:00:00Z",
+    "target_start": "2026-01-31T19:00:00Z",
+    "target_end_exclusive": "2026-02-28T19:00:00Z",
+    "output_dir": "artifacts/february_replay"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "source_files": {
+    "1": {
+      "file": "/Users/kubevele/IT/hackalem/project/ml-prognoz-model/Dataset HackAlemAI \u0434\u043b\u044f \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432 11.03.2023-28.02.2026 - turbine 1.csv",
+      "sha256": "c4c341582fb2dd348b7187f0128cff265fe055f469413871ebb5db50eef58b5b"
+    },
+    "2": {
+      "file": "/Users/kubevele/IT/hackalem/project/ml-prognoz-model/Dataset HackAlemAI \u0434\u043b\u044f \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432 11.03.2023-28.02.2026 - turbine 2.csv",
+      "sha256": "820578cd18bb557cd30c2e102f3ae5a386dfc6c489a5a15743339c2b017305e5"
+    }
+  },
+  "observation_timezone": "Etc/GMT-5",
+  "timezone_note": "PROVISIONAL: fixed UTC+05:00 throughout the CSV history; source timezone is undocumented. Confirm before operational interpretation.",
+  "label_convention": "UTC hour start, mean of six complete 10-minute readings",
+  "target_units": "normalized active power, not MW or MWh",
+  "summary": [
+    {
+      "turbine_id": "1",
+      "source_rows": 142360,
+      "valid_rows": 142360,
+      "invalid_rows": 0,
+      "candidate_hours": 25392,
+      "complete_hours": 23667,
+      "incomplete_hours": 1725,
+      "total_missing_hours": 1629,
+      "partially_observed_hours": 96,
+      "missing_slots": 9992
+    },
+    {
+      "turbine_id": "2",
+      "source_rows": 149499,
+      "valid_rows": 149499,
+      "invalid_rows": 0,
+      "candidate_hours": 25392,
+      "complete_hours": 24785,
+      "incomplete_hours": 607,
+      "total_missing_hours": 388,
+      "partially_observed_hours": 219,
+      "missing_slots": 2853
+    }
+  ],
+  "complete_hourly_rows": 48452,
+  "hourly_file": "/Users/kubevele/IT/hackalem/project/ml-prognoz-model/data/processed/hourly.parquet",
+  "hourly_sha256": "a9ae200fccfc7219a3ba5cc393269214a926644fb014b6c25bd878319921bb35",
+  "utc_start": "2023-03-10 19:00:00+00:00",
+  "utc_end": "2026-01-31 18:00:00+00:00"
+}

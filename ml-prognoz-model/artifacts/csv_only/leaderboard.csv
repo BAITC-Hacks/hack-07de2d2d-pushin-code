@@ -1,0 +1,15 @@
+family,name,mean_validation_mae,family_winner_holdout_mae,family_winner_holdout_rmse,family_winner_holdout_bias,selected_by_validation_only
+persistence,persistence_last_power,0.27927579365079364,0.35249936868686865,0.47209522727891307,0.013569444444444436,True
+catboost,catboost_250_depth_4,0.3038171800978627,0.31507447502278385,0.3549056242630912,0.08815479850551555,False
+catboost,catboost_350_depth_5,0.3054900024250836,,,,False
+seasonal_median,seasonal_median_turbine_origin_calendar,0.3062302681489262,0.30986284722222224,0.36868933455636393,0.019050347222222225,False
+ridge,ridge_alpha_10,0.30737467850959066,0.30994905698471253,0.3545726787702422,0.0815573026341269,False
+ridge,ridge_alpha_0.1,0.3078552846431309,,,,False
+ridge,ridge_alpha_1,0.30789259518081225,,,,False
+catboost,catboost_400_depth_6,0.30807347389813006,,,,False
+extra_trees,extra_trees_200_leaf_24_depth_12,0.3160516567331114,0.3117049834234764,0.3537538512577049,0.07925096842535007,False
+random_forest,random_forest_150_leaf_32_depth_10,0.31770391361576866,0.3212462948084306,0.36166106177629126,0.0983304687563464,False
+random_forest,random_forest_120_leaf_8_depth_14,0.3178784508019368,,,,False
+extra_trees,extra_trees_200_leaf_12_depth_16,0.3187593384663402,,,,False
+random_forest,random_forest_150_leaf_16_depth_12,0.3190299101709505,,,,False
+extra_trees,extra_trees_150_leaf_4_depth_16,0.32055545228583116,,,,False

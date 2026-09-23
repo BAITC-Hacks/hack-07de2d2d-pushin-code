@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+data/
+.DS_Store
+
+# Only the audited, final CSV-only experiment is delivered.
+artifacts/*
+!artifacts/csv_only/
+reports/*
+!reports/generated/
