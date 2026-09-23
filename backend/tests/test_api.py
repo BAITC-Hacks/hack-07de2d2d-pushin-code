@@ -888,3 +888,22 @@ def test_live_trace_is_read_from_the_store_path(client, root):
     trace.write_text(json.dumps(TRACE[0], ensure_ascii=False) + "\n", encoding="utf-8")
     body = client.get("/api/traces/live").json()
     assert body["issue_date"] == "live" and len(body["events"]) == 1
+
+
+def test_default_runner_passes_the_scenario_to_run_issue(client, monkeypatch):
+    seen = []
+
+    def run_issue(issue_date, *, mode, trigger, emit, scenario=None):
+        seen.append((issue_date, trigger, scenario))
+        emit({"type": "verdict", "title": "ok"})
+        return {"version": 1}
+
+    fake = types.ModuleType("windcast.agent")
+    fake.run_issue = run_issue
+    monkeypatch.setitem(sys.modules, "windcast.agent", fake)
+    for body in (
+        {"issue_date": ISSUE, "scenario": "weather_outage"},
+        {"issue_date": ISSUE},
+    ):
+        _wait_done(client, client.post("/api/runs", json=body).json()["id"])
+    assert seen == [(ISSUE, "issue", "weather_outage"), (ISSUE, "issue", None)]

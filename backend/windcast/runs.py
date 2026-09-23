@@ -48,12 +48,15 @@ class AgentUnavailable(RuntimeError):
     """windcast.agent cannot be imported yet (it is developed in parallel)."""
 
 
-def _default_runner(issue_date: str, *, mode: str, trigger: str, emit: Emit) -> Any:
+def _default_runner(
+    issue_date: str, *, mode: str, trigger: str, emit: Emit, **options: Any
+) -> Any:
+    """windcast.agent.run_issue; options (e.g. scenario) are passed through as keywords."""
     try:
         from windcast.agent import run_issue
     except ImportError as exc:
         raise AgentUnavailable(str(exc)) from exc
-    return run_issue(issue_date, mode=mode, trigger=trigger, emit=emit)
+    return run_issue(issue_date, mode=mode, trigger=trigger, emit=emit, **options)
 
 
 # Tests replace this with a fake; looked up at call time.
