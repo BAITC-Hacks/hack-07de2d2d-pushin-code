@@ -675,7 +675,7 @@ def test_runner_failure_becomes_error_and_verdict(client, monkeypatch):
     assert "сеть недоступна" in events[1]["body"]
     body = _wait_done(client, run_id)
     assert body["version"] is None
-    assert client.get("/health").status_code == 200  # the server is still fine
+    assert client.get("/api/live/status").status_code == 200  # server still fine
 
 
 def test_default_runner_without_agent_module(client, monkeypatch):
@@ -706,6 +706,10 @@ def test_running_status_dedupe_and_issue_lock(client, monkeypatch):
         first = client.post("/api/runs", json={"issue_date": ISSUE}).json()["id"]
         again = client.post("/api/runs", json={"issue_date": ISSUE}).json()["id"]
         assert again == first  # same issue + trigger + mode while running: same run
+        deadline = time.monotonic() + 5
+        while not client.get(f"/api/runs/{first}").json()["events"]:
+            assert time.monotonic() < deadline  # then the first run holds the lock
+            time.sleep(0.02)
         other = client.post(
             "/api/runs", json={"issue_date": ISSUE, "trigger": "new_weather_run"}
         ).json()["id"]
