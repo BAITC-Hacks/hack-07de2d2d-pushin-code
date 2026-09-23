@@ -14,6 +14,7 @@ Every 4xx is {"error": "<текст по-русски>"}; unexpected failures ar
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -30,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException
 
+from windcast import ask as ask_service
 from windcast import paths, ports, runs, timeline, watcher
 
 LIVE = "live"
@@ -631,12 +633,35 @@ def health() -> dict[str, Any]:
     ready = sum(1 for d in timeline.issue_dates() if _load_record(d.isoformat()))
     return {
         "ok": True,
+        "ask": True,
         "mode": runs.default_mode(),
         "model_version": _model_version(),
         "issues_ready": ready,
         "ports": _ports_status(),
         **watcher.status(),
     }
+
+
+@app.post("/api/ask")
+async def ask_endpoint(request: Request) -> dict[str, Any]:
+    body = await _json_body(request)
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip():
+        _fail(400, "Вопрос не должен быть пустым")
+    if len(question) > 500:
+        _fail(400, "Вопрос не должен быть длиннее 500 символов")
+    issue_date = body.get("issue_date")
+    if issue_date is not None and not isinstance(issue_date, str):
+        _fail(400, "Дата выпуска — ГГГГ-ММ-ДД, live или null")
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(ask_service.ask, question, issue_date),
+            timeout=ask_service.TIMEOUT_S,
+        )
+    except TimeoutError:
+        _fail(503, "Превышено время ожидания ответа агента")
+    except (TypeError, ValueError) as exc:
+        _fail(400, str(exc))
 
 
 # --- §6.1 calendar ------------------------------------------------------------------------
