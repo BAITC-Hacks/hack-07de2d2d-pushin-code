@@ -18,6 +18,10 @@ TEST_TO = date(2026, 2, 28)
 BACKTEST_FROM = date(2025, 12, 31)
 BACKTEST_TO = date(2026, 1, 29)
 
+# A model run is not usable at its start time: ECMWF IFS open data is published ~7-8 h after
+# initialisation. The "no future" rule is therefore init + RUN_AVAILABILITY_DELAY <= T.
+RUN_AVAILABILITY_DELAY = timedelta(hours=8)
+
 
 def parse_issue_date(value: str | date) -> date:
     """Parse "YYYY-MM-DD"; raise ValueError with a message the API can return as 400."""
@@ -45,6 +49,29 @@ def issue_time_local(issue: str | date) -> datetime:
 def target_times_utc(issue: str | date) -> list[datetime]:
     start = issue_time_utc(issue)
     return [start + timedelta(hours=h) for h in range(HORIZON)]
+
+
+def lead_days(h: int, *, previous: bool = False) -> int:
+    """Open-Meteo Previous Runs bucket N (`*_previous_dayN`) for horizon h.
+
+    previous_dayN for target t comes from a run started at most t - 24*N hours, so the run is
+    published by T when (h - 1) + 8 <= 24*N: h 1-17 -> 1, h 18-41 -> 2, h 42-48 -> 3.
+    previous=True (version v1, the older run) takes one day more.
+    """
+    if not 1 <= h <= HORIZON:
+        raise ValueError(f"h must be 1..{HORIZON}, got {h}")
+    delay_h = int(RUN_AVAILABILITY_DELAY.total_seconds() // 3600)
+    n = -(-(h - 1 + delay_h) // 24)
+    return n + 1 if previous else n
+
+
+def run_available_at(init_utc: datetime) -> datetime:
+    return init_utc.astimezone(timezone.utc) + RUN_AVAILABILITY_DELAY
+
+
+def published_before_issue(init_utc: datetime, issue: str | date) -> bool:
+    """The contract §2 check: the run was already published at the issue moment T."""
+    return run_available_at(init_utc) <= issue_time_utc(issue)
 
 
 def live_times(now: datetime | None = None) -> tuple[datetime, list[datetime]]:
