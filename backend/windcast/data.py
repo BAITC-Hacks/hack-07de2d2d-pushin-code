@@ -258,7 +258,13 @@ def check_data(issue_date: str, weather: dict) -> dict[str, object]:
         and not parsed_inits.empty
         and parsed_inits.notna().all()
         and all(
-            run_available_at(init.to_pydatetime()) <= issue_time
+            # Live snapshots come from the Forecast API, which serves only published runs;
+            # their init is the fetch time. Archive runs must be published by T (§2).
+            (
+                init.to_pydatetime() <= issue_time
+                if issue_date == "live"
+                else run_available_at(init.to_pydatetime()) <= issue_time
+            )
             for init in parsed_inits
         )
     )

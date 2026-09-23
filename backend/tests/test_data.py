@@ -187,12 +187,12 @@ def test_check_data_enforces_run_publication_delay_for_archive_issues(
     ("init_time", "expected_ok"),
     [
         ("2026-02-13T06:00:00Z", True),
-        ("2026-02-13T07:00:00Z", True),
-        ("2026-02-13T08:00:00Z", False),
-        ("2026-02-13T12:00:00Z", False),
+        ("2026-02-13T12:00:00Z", True),
+        ("2026-02-13T15:00:00Z", True),
+        ("2026-02-13T16:00:00Z", False),
     ],
 )
-def test_check_data_uses_live_issue_moment_for_publication_delay(
+def test_live_snapshot_must_not_postdate_issue_moment(
     init_time: str, expected_ok: bool
 ) -> None:
     issue_time = pd.Timestamp("2026-02-13T15:00:00Z")
@@ -231,3 +231,28 @@ def test_real_raw_csv_build_reports_quality() -> None:
         & (hourly["ts_utc"] <= pd.Timestamp("2024-07-17T18:00:00Z"))
     ]
     assert not blackout["valid"].any()
+
+
+def test_live_snapshot_is_accepted_at_fetch_time():
+    from datetime import datetime, timezone
+
+    import pandas as pd
+
+    from windcast import data
+    from windcast.timeline import live_times
+
+    now = datetime(2026, 9, 23, 11, 38, tzinfo=timezone.utc)
+    _, targets = live_times(now)
+    hourly = pd.DataFrame(
+        {
+            "h": range(1, 49),
+            "target_time_utc": targets,
+            "wind_100m_ms": [7.0] * 48,
+            "wind_10m_ms": [5.0] * 48,
+            "wind_dir_deg": [180.0] * 48,
+            "temp_c": [3.0] * 48,
+            "init_time_utc": [now] * 48,
+        }
+    )
+    result = data.check_data("live", {"issue_time_utc": now, "hourly": hourly})
+    assert result["runs_before_issue"] is True
