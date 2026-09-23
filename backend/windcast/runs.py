@@ -252,6 +252,12 @@ def active_run(issue_date: str) -> Run | None:
     return None
 
 
+def active_count() -> int:
+    """Unfinished runs of any kind right now."""
+    with _REGISTRY_LOCK:
+        return sum(1 for run in _REGISTRY.values() if not run.done)
+
+
 def running_issue_dates() -> set[str]:
     """Issue dates a run is working on right now (for status "running" in /api/issues)."""
     with _REGISTRY_LOCK:

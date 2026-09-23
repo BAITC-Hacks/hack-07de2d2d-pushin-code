@@ -52,6 +52,8 @@ CSV_COLUMNS = (
     "version",
 )
 RUN_FROM, RUN_TO = timeline.BACKTEST_FROM, timeline.TEST_TO  # dates a run may target
+MAX_ACTIVE_RUNS = 3  # public demo: unfinished runs of any kind allowed at once
+TOO_MANY_RUNS = "Слишком много прогонов одновременно — подождите завершения"
 MAX_RANGE_DAYS = 366
 ECMWF_CYCLE_H = 6  # ECMWF IFS runs at 00/06/12/18 UTC
 # a run becomes available this many hours after its init time (contract §2)
@@ -580,6 +582,25 @@ def _metrics_or_404() -> dict:
     return data
 
 
+def _metrics_period(data: dict) -> tuple[date, date]:
+    """The period the metrics file was computed for (falls back to the January window)."""
+    period = data.get("period")
+    if isinstance(period, dict):
+        try:
+            return (
+                date.fromisoformat(str(period.get("from"))),
+                date.fromisoformat(str(period.get("to"))),
+            )
+        except ValueError:
+            pass
+    return timeline.BACKTEST_FROM, timeline.BACKTEST_TO
+
+
+def _check_run_capacity() -> None:
+    if runs.active_count() >= MAX_ACTIVE_RUNS:
+        _fail(429, TOO_MANY_RUNS)
+
+
 def _model_version() -> str:
     try:
         return ports.model_version()
@@ -713,6 +734,8 @@ async def create_run(request: Request) -> dict[str, str]:
     mode = _mode_param(body.get("mode"))
     trigger = _choice(body.get("trigger"), TRIGGERS, "trigger", "issue")
     scenario = _scenario_param(body.get("scenario"))
+    if runs.active_run(issue) is None:  # joining a running issue never needs a slot
+        _check_run_capacity()
     run = runs.start_issue(issue, mode=mode, trigger=trigger, scenario=scenario)
     return {"id": run.id}
 
@@ -796,6 +819,7 @@ async def create_backtest(request: Request) -> dict[str, str]:
     if start > end:
         _fail(400, f"Начало периода {start} позже конца {end}")
     mode = _mode_param(body.get("mode"))
+    _check_run_capacity()
     run = runs.start_backtest(timeline.issue_dates(start, end), mode=mode)
     return {"id": run.id}
 
@@ -835,8 +859,18 @@ def metrics(
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
 ) -> dict[str, Any]:
-    _range_params(date_from, date_to, timeline.BACKTEST_FROM, timeline.BACKTEST_TO)
-    return {k: v for k, v in _metrics_or_404().items() if k != "series"}
+    start, end = _range_params(
+        date_from, date_to, timeline.BACKTEST_FROM, timeline.BACKTEST_TO
+    )
+    data = _metrics_or_404()
+    lo, hi = _metrics_period(data)
+    if (date_from or date_to) and (start, end) != (lo, hi):
+        _fail(
+            400,
+            f"Метрики посчитаны только за период {lo} — {hi}; "
+            "другой период не поддерживается",
+        )
+    return {k: v for k, v in data.items() if k != "series"}
 
 
 @app.get("/api/metrics/series")

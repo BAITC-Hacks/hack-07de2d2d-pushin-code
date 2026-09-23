@@ -520,6 +520,40 @@ def test_metrics_missing(client, root):
     _error(client.get("/api/metrics/series"), 404)
 
 
+def test_metrics_rejects_other_period(client):
+    msg = _error(client.get("/api/metrics?from=2026-01-01&to=2026-01-29"), 400)
+    assert msg == (
+        "Метрики посчитаны только за период 2025-12-31 — 2026-01-29; "
+        "другой период не поддерживается"
+    )
+    _error(client.get("/api/metrics?to=2026-01-15"), 400)
+    assert client.get("/api/metrics").status_code == 200
+
+
+def test_runs_capped_at_max_active(client, monkeypatch):
+    gate = threading.Event()
+    monkeypatch.setattr(runs, "RUNNER", _fake_runner([], gate=gate))
+    days = ["2026-02-10", "2026-02-11", "2026-02-12"]
+    ids = [client.post("/api/runs", json={"issue_date": d}).json()["id"] for d in days]
+    assert len(set(ids)) == api.MAX_ACTIVE_RUNS == 3
+
+    # the same issue date joins its running run instead of being refused
+    assert client.post("/api/runs", json={"issue_date": days[0]}).json()["id"] == ids[0]
+    msg = _error(client.post("/api/runs", json={"issue_date": "2026-02-14"}), 429)
+    assert msg == "Слишком много прогонов одновременно — подождите завершения"
+    _error(
+        client.post("/api/backtest", json={"from": "2026-02-01", "to": "2026-02-02"}),
+        429,
+    )
+
+    gate.set()
+    for run_id in ids:
+        _wait_done(client, run_id)
+    resp = client.post("/api/runs", json={"issue_date": "2026-02-14"})
+    assert resp.status_code == 200, resp.text
+    _wait_done(client, resp.json()["id"])
+
+
 # --- errors -----------------------------------------------------------------------------------
 
 
