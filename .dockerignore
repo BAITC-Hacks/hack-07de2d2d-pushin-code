@@ -1,0 +1,25 @@
+# Root build context (backend/Dockerfile). The image needs backend/, data/, models/, outputs/ only.
+.git
+.gitignore
+.gitattributes
+.env
+.env.*
+.claude
+.codex
+.agents
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store
+backend/tests
+data/processed
+outputs/live
+frontend
+docs
+infra
+scripts
+templates
