@@ -286,6 +286,8 @@ def _fetch_live() -> dict:
             stored = json.loads(cache.read_text(encoding="utf-8"))
             fetched_at = pd.to_datetime(stored["fetched_at"], utc=True).to_pydatetime()
             issue_time = datetime.now(timezone.utc)
+            if fetched_at > issue_time:
+                raise ValueError("Live-кэш получен после момента выпуска")
             data = stored["data"]
             _validate_live(data, issue_time)
         except (
