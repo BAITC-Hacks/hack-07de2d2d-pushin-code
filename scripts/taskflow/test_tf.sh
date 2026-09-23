@@ -83,6 +83,11 @@ git -C "$ORIGIN" symbolic-ref HEAD refs/heads/main
 git -C "$REPO" fetch -q origin
 git -C "$REPO" remote set-head origin -a >/dev/null
 
+# Verification must not mistake a nested virtual environment's dependencies for
+# first-party package roots.
+mkdir -p "$REPO/nested/.venv/ignored-package"
+printf '%s\n' 'from setuptools import setup' > "$REPO/nested/.venv/ignored-package/setup.py"
+
 cat > "$FAKEBIN/ruff" <<'EOF'
 #!/usr/bin/env bash
 printf 'ruff %s\n' "$*" >> "${TASKFLOW_LOG:?}"
