@@ -12,7 +12,12 @@ import pyarrow.parquet as pq
 
 from windcast.config import scada_utc_offset_hours
 from windcast.paths import processed_dir, raw_dir
-from windcast.timeline import issue_time_utc, live_times, target_times_utc
+from windcast.timeline import (
+    issue_time_utc,
+    live_times,
+    run_available_at,
+    target_times_utc,
+)
 
 TIMESTAMP_COLUMN = "Статистическое время"
 WIND_COLUMN = "Средняя скорость ветра(m/s)"
@@ -186,8 +191,8 @@ def check_data(issue_date: str, weather: dict) -> dict[str, object]:
     """Validate the weather payload handed from T2 before model inference.
 
     This does not put SCADA into forecast features. It only checks the 48-hour
-    weather contract and proves every supplied initialization is no later than
-    the requested issue moment.
+    weather contract and proves every supplied run was published by the
+    requested issue moment.
     """
     if issue_date == "live":
         supplied_issue_time = pd.to_datetime(
@@ -250,11 +255,13 @@ def check_data(issue_date: str, weather: dict) -> dict[str, object]:
     parsed_inits = pd.to_datetime(init_values, utc=True, errors="coerce")
     valid_inits = bool(
         issue_time is not None
+        and not parsed_inits.empty
         and parsed_inits.notna().all()
-        and (parsed_inits <= issue_time).all()
+        and all(
+            run_available_at(init.to_pydatetime()) <= issue_time
+            for init in parsed_inits
+        )
     )
-    if parsed_inits.empty:
-        valid_inits = False
     notes: list[str] = []
     if missing_hours:
         notes.append(f"В погодном окне отсутствует часов: {missing_hours}")
@@ -270,10 +277,10 @@ def check_data(issue_date: str, weather: dict) -> dict[str, object]:
         )
     if not valid_inits:
         notes.append(
-            "Есть погодный прогон позже момента выпуска или без времени инициализации"
+            "Есть погодный прогон, опубликованный позже момента выпуска или без времени инициализации"
         )
     if not notes:
-        notes.append("48 погодных часов и все прогоны не позже момента выпуска")
+        notes.append("48 погодных часов и все прогоны опубликованы к моменту выпуска")
     return {
         "ok": coverage_ok and targets_ok and values_ok and valid_inits,
         "missing_hours": missing_hours,

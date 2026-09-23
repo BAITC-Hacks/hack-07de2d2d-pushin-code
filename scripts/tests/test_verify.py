@@ -281,7 +281,7 @@ def test_run_published_after_the_issue_moment_is_named(tmp_path):
     )
 
     text = verify(root, *RANGE).stdout
-    assert "✗ Без будущего: прогон опубликован до T (CSV)" in text
+    assert "✗ Без будущего: прогон доступен к T (старт + 8 ч ≤ T, CSV)" in text
     assert text.strip().splitlines()[-1] == "FAIL: 1 проверка не пройдена"
 
 
@@ -292,10 +292,13 @@ def test_weather_init_without_zone_or_unparseable_fails(tmp_path, value):
 
     code, result = report(build(tmp_path, rows=only_issue(1, edit)))
     assert code == 1 and result["failed_checks"] == ["no_future"]
-    assert "не время с зоной" in messages(result, "no_future")
+    assert "публикацию к T подтвердить нельзя" in messages(result, "no_future")
 
 
-@pytest.mark.parametrize("start, published", [("06:00", True), ("12:00", False)])
+@pytest.mark.parametrize(
+    "start, published",
+    [("06:00", True), ("11:00", True), ("12:00", False), ("18:00", False)],
+)
 def test_record_runs_count_only_once_published(tmp_path, start, published):
     def edit(record):
         record["versions"]["1"]["weather_runs"][0]["init_utc"] = f"{ISSUES[0]}T{start}Z"
@@ -305,9 +308,11 @@ def test_record_runs_count_only_once_published(tmp_path, start, published):
         assert (code, result["failed_checks"]) == (0, [])
     else:
         assert (code, result["failed_checks"]) == (1, ["no_future_runs"])
+        init = datetime.fromisoformat(f"{ISSUES[0]}T{start}:00+00:00")
         assert messages(result, "no_future_runs") == (
-            "v1 weather_runs[0] (часы 1-17): прогон 2026-02-01T12:00Z опубликован "
-            "≈ 2026-02-01T20:00Z, позже момента выпуска T=2026-02-01T19:00Z"
+            f"v1 weather_runs[0] (часы 1-17): прогон {utc(init)} опубликован "
+            f"≈ {utc(init + timedelta(hours=8))}, позже момента выпуска "
+            f"T={utc(moment(ISSUES[0]))}"
         )
 
 
