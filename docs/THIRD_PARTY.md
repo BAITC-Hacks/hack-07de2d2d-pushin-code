@@ -1,0 +1,76 @@
+# Сторонние компоненты и заготовки
+
+Раскрытие по п. 5.4.4–5.4.4.2 и 5.4.12 положения HackAlem AI. Вынесено из README § 11.
+
+
+**Открытые библиотеки и образы:**
+
+| Компонент | Версия | Лицензия | Для чего |
+|---|---|---|---|
+| pandas | 2.2.3 | BSD-3-Clause | таблицы и временные ряды |
+| NumPy | 2.2.2 | BSD-3-Clause | вычисления |
+| PyArrow | 19.0.1 | Apache-2.0 | Parquet |
+| scikit-learn | 1.6.1 | BSD-3-Clause | квантильная модель `HistGradientBoostingRegressor`, `IsotonicRegression` для кривой мощности |
+| FastAPI | 0.115.12 | MIT | API |
+| Starlette, Pydantic | транзитивно через FastAPI | BSD-3-Clause, MIT | HTTP, SSE, валидация |
+| Uvicorn | 0.34.0 | BSD-3-Clause | ASGI-сервер |
+| openai-python | 1.109.1 | Apache-2.0 | клиент OpenAI API |
+| requests | 2.32.3 | Apache-2.0 | HTTP-клиент для Open-Meteo |
+| HTTPX | 0.28.1 | BSD-3-Clause | тестовый клиент API |
+| pytest | 8.3.5 | MIT | тесты |
+| Ruff | 0.16.8 | MIT | линтер |
+| LightGBM, SciPy, joblib, build, setuptools | 4.6.0, 1.15.2, 1.4.2, 1.2.2.post1, 75.8.0 | MIT, BSD-3-Clause, BSD-3-Clause, MIT, MIT | в `requirements.txt`, в итоговом коде не используются |
+| Python (`python:3.12-slim`) | 3.12 | PSF-2.0 | среда бэкенда |
+| nginx (`nginx:1.27-alpine`) | 1.27 | BSD-2-Clause | отдаёт интерфейс, проксирует `/api/` |
+| Caddy (`caddy:2.11.4-alpine`) | 2.11.4 | Apache-2.0 | обратный прокси |
+| React, react-dom | 18.2.0 | MIT | интерфейс |
+| Vite, @vitejs/plugin-react | 6.4.3, 4.7.0 | MIT | сборка интерфейса |
+| vitest, jsdom | 4.1.11, 22.1.0 | MIT | тесты интерфейса |
+| Node.js (`node:20.11.1-alpine3.19`) | 20.11.1 | MIT | стадия сборки интерфейса в Docker |
+| Шрифты IBM Plex Sans и IBM Plex Mono (Google Fonts) | — | SIL OFL 1.1 | шрифты интерфейса; грузятся с `fonts.googleapis.com`, без сети — системные |
+| CatBoost, hatchling, uv | CatBoost ≥ 1.2 | Apache-2.0, MIT, MIT / Apache-2.0 | только эксперимент `ml-prognoz-model/`, в продукт не входит |
+
+Библиотек графиков и UI-компонентов в интерфейсе нет: графики рисует свой код на SVG. Лицензии
+Python-пакетов сверены с метаданными установленных пакетов, JS-пакетов — с `frontend/package.json`.
+
+**Данные:**
+
+| Данные | Источник | Условия |
+|---|---|---|
+| SCADA двух турбин, 10 мин, 11.03.2023–31.01.2026 (`data/raw/`) | организатор HackAlem AI | выданы для задачи, в репозитории без изменений |
+| Архивные (`previous_day1…4`) и текущие прогнозы погоды, `models=best_match` | [Open-Meteo.com](https://open-meteo.com/) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), без ключа, бесплатно для некоммерческого использования. **Weather data by [Open-Meteo.com](https://open-meteo.com/)** |
+| Исходные модели прогноза, которые Open-Meteo подбирает для координат ВЭС | ECMWF IFS (CC BY 4.0), DWD ICON (CC BY 4.0), NOAA GFS (public domain) | через Open-Meteo; в выпусках источник записан как `best_match` |
+
+**Сервисы:** OpenAI API — выбор шагов агента, решения о пересчёте и тексты сводок, модель по умолчанию
+`gpt-5.4-mini`. Числа прогноза LLM не создаёт.
+
+**AI-ассистенты при разработке** (разрешено п. 5.4.12): Claude Code (Anthropic) и OpenAI Codex. С ними
+писали код, тесты, документацию и ревью изменений. Каждое изменение закоммичено участником команды,
+история — в git.
+
+**Заготовки, подготовленные до хакатона** (п. 5.4.4.2). Это наш собственный инфраструктурный и процессный
+набор. Готового продукта или основной части решения в нём нет:
+
+| Что | Где | Когда |
+|---|---|---|
+| Инфраструктура деплоя: Caddy-конфиги, compose для сервера, push-to-deploy (bare-репозиторий с хуком), скрипт настройки сервера, дымовая заглушка для проверки деплоя | `infra/`, `templates/smoke/` | 22.09 |
+| Процессные скрипты: чекпоинт с поиском секретов, ревью веток, наблюдатель за пушами | `scripts/checkpoint.sh`, `scripts/review.sh`, `scripts/review-prompt.md`, `scripts/watch.sh` | 22.09 |
+| Шаблоны: README, контракт, слайды, сценарий видео, чек-лист сдачи | `templates/` | 22.09 |
+| Справочники: образец цикла агента на OpenAI tool calling (~80 строк), схема событий следа, панель следа на React, памятка по данным | `docs/references/` | 22.09 |
+| Правила работы команды и AI-ассистентов, шаблоны доски и рубрики, копии положения и критериев | `AGENTS.md`, `BOARD.md`, `docs/RUBRIC.md`, `docs/SCORE.md`, `docs/hackathon/` | 22.09; наполнены под ТЗ 23.09 |
+| Workflow доставки задач через worktree и pull request (Куба) | `scripts/taskflow/`, `.agents/`, `.codex/`, `RTK.md`, `docs/task-workflow.md`, `docs/change-request-template.md` | подготовлен заранее, добавлен в репозиторий 23.09 в 14:20 (PR #1) |
+
+Из справочника `docs/references/agent_loop.py` в продукт не вошло ни строки: `agent.py` написан заново
+(свой реестр инструментов, детерминированный водитель цикла, проверка чисел в сводке), общая у них только
+идея — цикл tool calling с событиями по схеме следа.
+
+**Вся продуктовая функциональность написана в соревновательной части, 23.09 с 13:00 до 18:00.** Это
+конвейер данных, клиент погоды, модель, агент и инструменты, API, Live-наблюдатель, интерфейс,
+`scripts/verify.py`, корневой `docker-compose.yml`, `backend/Dockerfile`, контракт, схема архитектуры,
+макет и эксперимент `ml-prognoz-model/`. Первый коммит в `backend/` и `frontend/` сделан 23.09 в 14:42,
+эксперимент добавлен в 16:09. Проверить можно так:
+
+```bash
+git log --reverse --date=format:'%Y-%m-%d %H:%M' --format='%ad %an %s' -- backend frontend scripts/verify.py ml-prognoz-model | head
+```
+
