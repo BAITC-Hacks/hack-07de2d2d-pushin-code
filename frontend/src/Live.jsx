@@ -27,7 +27,7 @@ function Journal({ entries, error }) {
         {entries.map((entry) => (
           <li key={`${entry.ts}-${entry.run_id}`} className={`jr jr-${entry.outcome}`}>
             <time>{localStamp(entry.ts)}</time>
-            <span className={`who ${entry.initiator}`}>{entry.initiator === 'agent' ? 'агент сам' : 'по кнопке'}</span>
+            <span className={`who who-${entry.initiator}`}>{entry.initiator === 'agent' ? 'агент сам' : 'по кнопке'}</span>
             <span className="jr-outcome">{OUTCOME[entry.outcome] || entry.outcome}{entry.version ? ` v${entry.version}` : ''}</span>
             <span className="jr-title">{entry.title}</span>
           </li>

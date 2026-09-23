@@ -118,9 +118,9 @@ export default function App() {
           ))}
         </nav>
         <div className="top-right">
-          <span className={`mode ${health?.mode || ''}${health?.ok === false ? ' down' : ''}`} title={health?.model_version ? `модель ${health.model_version}` : ''}>{mode}</span>
-          {fixtureMode && <span className="mode fixture">фикстуры</span>}
-          <button type="button" className="btn primary" onClick={() => setDrawer(true)}>Как проверить за 3 минуты</button>
+          <span className={`mode mode-${health?.mode || "unknown"}${health?.ok === false ? " mode-down" : ""}`} title={health?.model_version ? `модель ${health.model_version}` : ''}>{mode}</span>
+          {fixtureMode && <span className="mode mode-fixture">фикстуры</span>}
+          <button type="button" className="btn primary" onClick={() => setDrawer(true)}>Как проверить<span className="check-long"> за 3 минуты</span></button>
         </div>
       </header>
 
