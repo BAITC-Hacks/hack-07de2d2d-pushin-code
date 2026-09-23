@@ -774,6 +774,10 @@ tf_verify() {
             ruff_cmd=("$python_bin" -m ruff)
           elif tf_command_exists ruff; then
             ruff_cmd=(ruff)
+          elif tf_command_exists uvx; then
+            # Keep the lint gate reproducible for repositories that contain Python
+            # sources but do not yet declare a project environment.
+            ruff_cmd=(uvx --from ruff ruff)
           fi
           if tf_python_build_metadata "$candidate" && tf_python_tool_available "$python_bin" build; then
             build_cmd=("$python_bin" -m build --wheel --outdir "$build_out" --no-isolation)
