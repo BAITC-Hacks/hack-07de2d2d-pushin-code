@@ -1,0 +1,20 @@
+{
+  "origin": "2026-01-31 19:00:00+00:00",
+  "models": {
+    "best_model": {
+      "rows": 96,
+      "future_measurement_perturbation": "unchanged",
+      "bounded_and_finite": true,
+      "sha256": "308e58a8314817a1feb3954eff95a9e3e915b883afc4f101ef24afa292f09776",
+      "family": "persistence"
+    },
+    "best_ml_model": {
+      "rows": 96,
+      "future_measurement_perturbation": "unchanged",
+      "bounded_and_finite": true,
+      "sha256": "37f643d87f5b5bc9f9cc319439bd3f840578567aa9039cb049276d8e679c7d07",
+      "family": "catboost"
+    }
+  },
+  "24h_is_prefix_of_48h": true
+}
