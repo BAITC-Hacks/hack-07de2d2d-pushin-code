@@ -51,6 +51,8 @@ publish_forecast — это v1.
 появился новый риск (new_flags_vs_current). Решение за тобой: перед вызовом recalc_forecast \
 одной фразой напиши, почему пересчитываешь; если не пересчитываешь — объясни почему и закончи.
 5. recalc_forecast уже анализирует новую версию — после него сразу publish_forecast (v2).
+Для Live более старого снимка может не быть: тогда fetch_weather(run="previous") сам берёт \
+последний прогон, и v1 строится на нём.
 6. Не больше 8 вызовов инструментов на выпуск. Если инструмент вернул сбой источника — \
 повтори его один раз.
 7. summary в publish_forecast — сводка для диспетчера по-русски, 2–3 предложения: пик, \
@@ -58,6 +60,12 @@ publish_forecast — это v1.
 (держать резерв, учесть в заявке). Для v2 добавь, что изменилось (change_note).
 8. Когда закончил, ответь коротким итогом по-русски без вызова инструментов."""
 
+NO_NEWER_TITLE = "Более свежего прогона пока нет — проверю при следующем обновлении"
+NO_NEWER_EVENT = (
+    "v1 построена на последнем прогоне: для Live более старого снимка нет, а свежее "
+    "последнего прогона пока нет — пересчёт не нужен. Заверши коротким итогом без вызова "
+    "инструментов."
+)
 NEW_RUN_EVENT = (
     'Событие: вышел новый прогон погоды. Посмотри его через fetch_weather(run="latest") '
     "и реши по политике пересчёта."
@@ -210,12 +218,31 @@ def _announce_new_run(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
     )
 
 
+def _v1_on_latest(ctx: tools.RunContext) -> bool:
+    """Live without an older snapshot: v1 already stands on the latest run."""
+    return ctx.trigger == "issue" and ctx.base_run == "latest"
+
+
 def _should_announce(ctx: tools.RunContext) -> bool:
     return (
         ctx.trigger == "issue"
         and not ctx.new_run_announced
         and 1 in ctx.versions
         and ctx.decision is None
+        and not _v1_on_latest(ctx)
+    )
+
+
+def _keep_until_next_update(
+    ctx: tools.RunContext, registry: tools.ToolRegistry
+) -> None:
+    registry.decide(
+        False,
+        by="rule",
+        title=NO_NEWER_TITLE,
+        keep_reason="более свежего прогона пока нет",
+        reason="v1 уже построена на последнем прогоне, а свежее него прогона пока нет. "
+        "Новый прогон проверю при следующем обновлении погоды.",
     )
 
 
@@ -228,11 +255,11 @@ def _next_step(ctx: tools.RunContext) -> tuple[str, dict] | None:
     if ctx.failed:
         return None
     if ctx.trigger == "issue" and not ctx.versions:
-        if "previous" not in ctx.weathers:
+        if ctx.base_run not in ctx.weathers:
             return "fetch_weather", {"run": "previous"}
-        check = ctx.checks.get("previous")
+        check = ctx.checks.get(ctx.base_run)
         if check is None:
-            return "check_data", {"run": "previous"}
+            return "check_data", {"run": ctx.base_run}
         if not check["ok"]:
             return "fail", {
                 "reason": "погода не прошла проверку: " + "; ".join(check["notes"])
@@ -247,6 +274,8 @@ def _next_step(ctx: tools.RunContext) -> tuple[str, dict] | None:
             return "analyze_forecast", {}
         return "publish_forecast", {"summary": tools.summary_text(current)}
     if ctx.decision is None:
+        if _v1_on_latest(ctx):
+            return "keep", {}
         if not _facts_fresh(ctx):
             return "fetch_weather", {"run": "latest"}
         return "decide", {}
@@ -261,6 +290,8 @@ def _describe(step: tuple[str, dict] | None) -> str:
     name, args = step
     if name == "fail":
         return "остановка: данные непригодны"
+    if name == "keep":
+        return "решение: v1 остаётся до следующего обновления"
     return (
         "решение о пересчёте" if name == "decide" else f"{name}({args.get('run', '')})"
     )
@@ -281,6 +312,9 @@ def _drive(
         if name == "fail":
             _fail(ctx, tracer, args["reason"], "check_data")
             break
+        if name == "keep":
+            _keep_until_next_update(ctx, registry)
+            continue
         if (
             name == "fetch_weather"
             and args.get("run") == "latest"
@@ -468,7 +502,11 @@ def _run_llm(
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 }
             )
-        if _should_announce(ctx):
+        if _v1_on_latest(ctx) and 1 in ctx.versions and ctx.decision is None:
+            _keep_until_next_update(ctx, registry)
+            ctx.grounding.append(NO_NEWER_EVENT)
+            messages.append({"role": "user", "content": NO_NEWER_EVENT})
+        elif _should_announce(ctx):
             _announce_new_run(ctx, tracer)
             ctx.grounding.append(NEW_RUN_EVENT)
             messages.append({"role": "user", "content": NEW_RUN_EVENT})
@@ -530,6 +568,8 @@ def _llm_stopped(
 
 # ---------- verdict ----------
 def _keep_reason(ctx: tools.RunContext, number: int) -> str:
+    if (ctx.decision or {}).get("keep_reason"):
+        return ctx.decision["keep_reason"]
     facts = ctx.facts or {}
     if not facts or not facts.get("current_version"):
         return "новый прогон недоступен"

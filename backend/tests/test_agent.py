@@ -3,7 +3,7 @@ import json
 import re
 import sys
 import types
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -289,17 +289,196 @@ def test_live_issue_writes_live_outputs():
     assert result["record_path"] == str(live / "latest.json")
     assert result["trace_path"] == str(live / "latest_trace.jsonl")
     record = store.load_record("live")
-    assert record["issue_date"] == "live" and record["latest_version"] >= 1
+    assert record["issue_date"] == "live" and record["latest_version"] == 1
     header, rows = _csv_rows(live / "latest.csv")
     assert header == CSV_HEADER and len(rows) == 144
     now = datetime.now(timezone.utc)
-    for r in rows:
-        assert _utc(r["weather_init_max_utc"]) + timedelta(hours=8) <= now
+    for r in rows:  # a Live snapshot is stamped with its fetch time: taken by T = now
+        assert _utc(r["weather_init_max_utc"]) <= now
     trace = store.load_trace("live")
     _assert_events(trace, "live")
     assert any(e["type"] == "action" for e in trace)
     again = agent.run_issue("live", mode="deterministic", trigger="new_weather_run")
     assert again["version"] == record["latest_version"]
+
+
+def test_live_without_older_snapshot_issues_v1_on_latest_run():
+    with pytest.raises(ValueError, match="нет подтверждённого предыдущего снимка"):
+        _stubs.fetch_weather("live", "previous")
+    events: list[dict] = []
+    result = agent.run_issue("live", mode="deterministic", emit=events.append)
+    assert result["version"] == 1
+    _assert_events(events, "live")
+    fallback = [
+        e for e in events if e["title"].startswith("Для Live нет более старого")
+    ]
+    assert len(fallback) == 1
+    assert fallback[0]["title"] == (
+        "Для Live нет более старого снимка — выпускаю v1 на последнем прогоне"
+    )
+    assert fallback[0]["meta"]["stage"] == "weather"
+    assert fallback[0]["meta"]["status"] == "ok"
+    assert _tool_calls(events) == [
+        "fetch_weather",
+        "check_data",
+        "run_model",
+        "analyze_forecast",
+        "publish_forecast",
+    ]
+    decision = _decisions(events)
+    assert len(decision) == 1
+    assert decision[0]["title"] == agent.NO_NEWER_TITLE
+    assert decision[0]["meta"]["status"] == "skip"
+    assert decision[0]["meta"]["by"] == "rule"
+    assert not [e for e in events if e["type"] == "error"]
+    assert (
+        events[-1]["title"] == "Итог: опубликована v1 — более свежего прогона пока нет"
+    )
+    entry = store.load_record("live")["versions"]["1"]
+    assert entry["source"] == "stub" and all(
+        r["before_issue"] for r in entry["weather_runs"]
+    )
+
+
+def test_live_new_weather_run_recalculates_on_a_moved_snapshot(monkeypatch):
+    agent.run_issue("live", mode="deterministic")
+    real = _stubs.fetch_weather
+
+    def windier(issue_date, run="latest"):
+        weather = real(issue_date, run)
+        weather["hourly"]["wind_100m_ms"] += 2.0
+        return weather
+
+    monkeypatch.setattr(_stubs, "fetch_weather", windier)
+    events: list[dict] = []
+    result = agent.run_issue(
+        "live", mode="deterministic", trigger="new_weather_run", emit=events.append
+    )
+    assert result["version"] == 2
+    facts = next(
+        e
+        for e in events
+        if e["type"] == "tool_result" and e["meta"]["tool"] == "fetch_weather"
+    )
+    assert facts["title"].startswith("Новый прогон: свежее v1")
+    decision = _decisions(events)
+    assert decision[0]["meta"]["decision"] == "recalc"
+    record = store.load_record("live")
+    assert sorted(record["versions"]) == ["1", "2"]
+    assert record["versions"]["2"]["change_note"].startswith("ветер +2,0 м/с")
+
+
+def test_live_llm_path_keeps_v1_without_asking_for_a_recalc():
+    client = FakeClient(dispatcher_policy())
+    events: list[dict] = []
+    result = agent.run_issue("live", mode="agent", emit=events.append, client=client)
+    assert result["version"] == 1
+    assert _tool_calls(events) == [
+        "fetch_weather",
+        "check_data",
+        "run_model",
+        "analyze_forecast",
+        "publish_forecast",
+    ]
+    decision = _decisions(events)
+    assert len(decision) == 1 and decision[0]["title"] == agent.NO_NEWER_TITLE
+    last_user = [m for m in client.requests[-1]["messages"] if m["role"] == "user"][-1]
+    assert last_user["content"] == agent.NO_NEWER_EVENT
+    assert not [e for e in events if e["type"] == "error"]
+    assert store.load_record("live")["mode"] == "agent"
+
+
+def test_llm_recalc_after_rule_kept_v1_is_refused():
+    def stubborn(messages):
+        calls, _ = _history(messages)
+        if calls and calls[-1] == "publish_forecast" and messages[-1]["role"] == "user":
+            return "Всё равно пересчитаю.", [("recalc_forecast", {"reason": "хочу"})]
+        if calls and calls[-1] == "recalc_forecast":
+            return "Понял, v1 остаётся.", []
+        return dispatcher_policy()(messages)
+
+    events: list[dict] = []
+    result = agent.run_issue(
+        "live", mode="agent", emit=events.append, client=FakeClient(stubborn)
+    )
+    assert result["version"] == 1
+    refused = next(
+        e
+        for e in events
+        if e["type"] == "tool_result" and e["meta"]["tool"] == "recalc_forecast"
+    )
+    assert refused["meta"]["status"] == "error"
+    assert "Решение по новому прогону уже принято" in refused["body"]
+    assert sorted(store.load_record("live")["versions"]) == ["1"]
+
+
+def test_live_weather_outage_retries_and_marks_reduced_confidence():
+    events: list[dict] = []
+    result = agent.run_issue(
+        "live", mode="deterministic", emit=events.append, scenario="weather_outage"
+    )
+    assert result["version"] == 1
+    titles = [e["title"] for e in events]
+    assert (
+        titles.count(
+            "Для Live нет более старого снимка — выпускаю v1 на последнем прогоне"
+        )
+        == 1
+    )
+    assert "Источник погоды недоступен" in titles
+    assert "Источник погоды не ответил — повторяю запрос" in titles
+    warns = [e["title"] for e in events if e["meta"]["status"] == "warn"]
+    assert any("со второй попытки" in t for t in warns)
+
+
+class WeatherUnavailable(RuntimeError):
+    """Like windcast.weather.WeatherUnavailable: a class the agent does not import."""
+
+
+@pytest.mark.parametrize("issue_date", ["2026-02-13", "live"])
+def test_any_weather_port_error_is_reported_never_raised(monkeypatch, issue_date):
+    def down(issue_date, run="latest"):
+        raise WeatherUnavailable("Нет валидного кэша Open-Meteo")
+
+    monkeypatch.setattr(_stubs, "fetch_weather", down)
+    events: list[dict] = []
+    result = agent.run_issue(issue_date, mode="deterministic", emit=events.append)
+    assert result["version"] is None
+    _assert_events(events, issue_date)
+    unavailable = [e for e in events if e["title"] == "Источник погоды недоступен"]
+    assert len(unavailable) == 2  # the first try and the retry
+    assert "WeatherUnavailable: Нет валидного кэша Open-Meteo" in unavailable[0]["body"]
+    assert events[-1]["meta"]["status"] == "error"
+    assert store.load_record(issue_date) is None
+
+
+def test_new_weather_run_with_weather_down_keeps_the_version(monkeypatch):
+    agent.run_issue(KEEP_DAY, mode="deterministic")
+
+    def down(issue_date, run="latest"):
+        raise WeatherUnavailable("сеть недоступна")
+
+    monkeypatch.setattr(_stubs, "fetch_weather", down)
+    events: list[dict] = []
+    result = agent.run_issue(
+        KEEP_DAY, mode="deterministic", trigger="new_weather_run", emit=events.append
+    )
+    assert result["version"] == 1
+    decision = _decisions(events)
+    assert len(decision) == 1 and decision[0]["meta"]["status"] == "warn"
+    assert events[-1]["type"] == "verdict" and events[-1]["meta"]["status"] == "skip"
+
+
+def test_policy_recalculates_when_the_window_no_longer_overlaps():
+    facts = {
+        "fresher_than_current": True,
+        "all_inits_before_issue": True,
+        "mean_abs_wind_shift_h1_24_ms": 0.0,
+        "new_flags_vs_current": [],
+        "overlap_hours": 0,
+    }
+    assert tools.policy_recalc(facts)
+    assert not tools.policy_recalc({**facts, "overlap_hours": 30})
 
 
 def test_weather_outage_is_retried_and_marked():
@@ -378,7 +557,10 @@ def dispatcher_policy(summary=None):
             return "Начинаю с погоды на момент выпуска.", [
                 ("fetch_weather", {"run": "previous"})
             ]
-        if last == "fetch_weather" and result.get("run") == "previous":
+        if last == "fetch_weather" and "previous" in (
+            result.get("run"),
+            result.get("requested_run"),
+        ):
             return None, [("check_data", {})]
         if last == "check_data":
             return None, [("run_model", {})]
@@ -388,9 +570,10 @@ def dispatcher_policy(summary=None):
             text = summary or _grounded_summary(results)
             return None, [("publish_forecast", {"summary": text})]
         if last == "publish_forecast" and result.get("version") == 1:
-            if messages[-1]["role"] == "user":  # the new-run event arrived
+            event = messages[-1]
+            if event["role"] == "user" and "вышел новый прогон" in event["content"]:
                 return None, [("fetch_weather", {"run": "latest"})]
-            return "Жду новый прогон.", []
+            return "Готово: v1 опубликована, новых прогонов ждать не нужно.", []
         if last == "fetch_weather":
             if tools.policy_recalc(result):
                 return "Сдвиг ветра больше порога — пересчитываю.", [
