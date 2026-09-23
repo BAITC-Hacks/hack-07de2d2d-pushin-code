@@ -62,6 +62,28 @@ publish_forecast — это v1.
 (держать резерв, учесть в заявке). Для v2 добавь, что изменилось (change_note).
 8. Когда закончил, ответь коротким итогом по-русски без вызова инструментов."""
 
+NUDGE_DECISION = (
+    "Ты не вызвал инструмент. Если пересчитываешь — вызови recalc_forecast; если "
+    "оставляешь текущую версию — ответь одной фразой, почему."
+)
+NUDGE_UNFINISHED = (
+    "Ты не вызвал инструмент, а выпуск ещё не завершён. Вызови следующий инструмент цикла: "
+    "{step}."
+)
+# Negated recalculation ("пересчёт не нужен", "не пересчитываю") means keeping the version.
+_NEGATED_RECALC = re.compile(
+    r"не\s+(?:нужно\s+|надо\s+|буду\s+|стоит\s+|требуется\s+)?пересчит\w*"
+    r"|пересчит\w*\s+не\s+(?:нужно|надо|требуется|буду|стоит)"
+    r"|пересчет\w*\s+не\s+(?:нужен|нужна|нужно|требуется)"
+    r"|без\s+пересчет\w*"
+    r"|не\s+вызыва\w*\s+recalc_forecast|recalc_forecast\s+не\s+вызыва\w*"
+)
+_RECALC_WORDS = re.compile(
+    r"пересчитыва|пересчитаю|пересчитать|пересчитает"
+    r"|(?:нужен|требуется|выполняю|запускаю|делаю)\s+пересчет|пересчет\s+(?:нужен|требуется)"
+    r"|recalc_forecast"
+)
+_KEEP_WORDS = re.compile(r"оставля|оставлю|оставить|остается|сохраня")
 NO_NEWER_TITLE = "Более свежего прогона пока нет — проверю при следующем обновлении"
 NO_NEWER_EVENT = (
     "v1 построена на последнем прогоне: для Live более старого снимка нет, а свежее "
@@ -447,6 +469,7 @@ def _run_llm(
     effort = os.environ.get("OPENAI_REASONING_EFFORT", "").strip()
     if effort and _EFFORT_MODELS.match(model):
         kwargs["reasoning_effort"] = effort
+    nudged = False
     while True:
         if ctx.tool_calls >= MAX_TOOL_CALLS:
             _limit_reached(ctx, tracer)
@@ -483,8 +506,22 @@ def _run_llm(
                 by="llm",
             )
         if not calls:
-            _llm_stopped(ctx, registry, tracer, text)
-            return
+            nudge = _after_stop(ctx, registry, tracer, text, nudged=nudged)
+            if nudge is None:
+                return
+            nudged = True
+            tracer.event(
+                "thought",
+                "LLM не вызвал инструмент — напоминаю один раз",
+                nudge,
+                stage="recalc" if _at_decision(ctx) else None,
+                status="warn",
+                version=ctx.event_version(),
+                source=ctx.event_source(),
+            )
+            ctx.grounding.append(nudge)
+            messages.append({"role": "user", "content": nudge})
+            continue
         for call in calls:
             if ctx.tool_calls >= MAX_TOOL_CALLS:
                 _limit_reached(ctx, tracer)
@@ -544,28 +581,74 @@ def _limit_reached(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
     )
 
 
-def _llm_stopped(
-    ctx, registry: tools.ToolRegistry, tracer: tools.Tracer, text: str
-) -> None:
-    """The LLM answered without tools: a decision to keep the version, or an early stop."""
+def recalc_intent(text: str) -> bool | None:
+    """True: the text announces a recalculation; False: it keeps the version; None: neither."""
+    low = (text or "").lower().replace("ё", "е")
+    negated = _NEGATED_RECALC.search(low)
+    if _RECALC_WORDS.search(_NEGATED_RECALC.sub(" ", low)):
+        return True
+    if negated or _KEEP_WORDS.search(low):
+        return False
+    return None
+
+
+def _at_decision(ctx: tools.RunContext) -> bool:
+    """The new-run facts are in and v{n} is published, but nothing is decided yet."""
     current = ctx.current
-    if (
+    return (
         current is not None
         and current.published
         and ctx.decision is None
         and _facts_fresh(ctx)
-    ):
-        registry.decide(False, by="llm", reason=text)
-        return
-    remaining = _next_step(ctx)
-    if remaining is not None:
-        tracer.event(
-            "thought",
-            "LLM закончил раньше цикла — довожу по регламенту",
-            f"Следующий шаг по регламенту: {_describe(remaining)}.",
-            status="warn",
-            version=ctx.event_version(),
+    )
+
+
+def _after_stop(
+    ctx: tools.RunContext,
+    registry: tools.ToolRegistry,
+    tracer: tools.Tracer,
+    text: str,
+    *,
+    nudged: bool,
+) -> str | None:
+    """The LLM answered without tools. Returns a one-time nudge, or None to end the loop.
+
+    A genuine keep (no recalculation intent in the text) is the LLM's decision. A stop that
+    announces a recalculation, or says nothing decisive, gets one nudge; after that the rule
+    decides and the trace says so — never a keep by the LLM that promised to recalculate.
+    """
+    if _at_decision(ctx):
+        if recalc_intent(text) is False:
+            registry.decide(False, by="llm", reason=text)
+            return None
+        if not nudged:
+            return NUDGE_DECISION
+        recalc = tools.policy_recalc(ctx.facts)
+        number = ctx.current.number
+        rule = tools.decision_title(ctx.facts, recalc, number, ctx.live)
+        rule = rule[0].lower() + rule[1:].replace(" — ", ", ")
+        registry.decide(
+            recalc,
+            by="rule",
+            title=f"LLM не вызвал инструмент — решение по правилу: {rule}",
+            reason="LLM дважды ответил без вызова инструмента"
+            + (f" («{_headline(text, 120)}»)" if text else "")
+            + " — решаю по политике пересчёта.",
         )
+        return None
+    remaining = _next_step(ctx)
+    if remaining is None or remaining[0] == "fail":  # finished, or nothing to continue
+        return None
+    if not nudged:
+        return NUDGE_UNFINISHED.format(step=_describe(remaining))
+    tracer.event(
+        "thought",
+        "LLM закончил раньше цикла — довожу по регламенту",
+        f"Следующий шаг по регламенту: {_describe(remaining)}.",
+        status="warn",
+        version=ctx.event_version(),
+    )
+    return None
 
 
 # ---------- verdict ----------

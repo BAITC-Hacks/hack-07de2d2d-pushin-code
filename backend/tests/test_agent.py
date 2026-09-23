@@ -846,3 +846,123 @@ def test_llm_bad_data_stops_with_error_and_verdict(monkeypatch):
     assert result["version"] is None
     assert any(e["type"] == "error" and "непригодны" in e["title"] for e in events)
     assert events[-1]["type"] == "verdict" and events[-1]["meta"]["status"] == "error"
+
+
+# ---------- the LLM stops without a tool call ----------
+def announce_recalc_policy(*, comply_after_nudge: bool):
+    """At the new-run facts the LLM announces a recalculation but calls no tool."""
+
+    def policy(messages):
+        calls, results = _history(messages)
+        at_facts = bool(calls) and calls[-1] == "fetch_weather"
+        if at_facts and results[-1].get("current_version"):
+            nudged = messages[-1]["role"] == "user" and (
+                messages[-1]["content"] == agent.NUDGE_DECISION
+            )
+            if nudged and comply_after_nudge:
+                return "Вызываю пересчёт.", [
+                    ("recalc_forecast", {"reason": "сдвиг ветра больше порога"})
+                ]
+            return "Пересчитываю: сдвиг ветра выше порога 0,5 м/с.", []
+        return dispatcher_policy()(messages)
+
+    return policy
+
+
+def _nudges(client: FakeClient) -> int:
+    last = client.requests[-1]["messages"]
+    return sum(
+        m["role"] == "user" and m["content"] == agent.NUDGE_DECISION for m in last
+    )
+
+
+def test_llm_that_announces_recalc_without_a_call_is_nudged_and_complies():
+    client = FakeClient(announce_recalc_policy(comply_after_nudge=True))
+    events: list[dict] = []
+    result = agent.run_issue(
+        RECALC_DAY, mode="agent", emit=events.append, client=client
+    )
+    assert result["version"] == 2
+    assert _nudges(client) == 1
+    nudge = [
+        e
+        for e in events
+        if e["title"] == "LLM не вызвал инструмент — напоминаю один раз"
+    ]
+    assert len(nudge) == 1 and nudge[0]["meta"]["stage"] == "recalc"
+    decision = _decisions(events)
+    assert len(decision) == 1
+    assert decision[0]["meta"]["by"] == "llm"
+    assert decision[0]["meta"]["decision"] == "recalc"
+    assert _tool_calls(events)[-2:] == ["recalc_forecast", "publish_forecast"]
+    assert events[-1]["title"] == "Итог: опубликована v2 — пересчёт на свежем прогоне"
+
+
+def test_llm_that_stops_twice_is_decided_by_rule_honestly():
+    client = FakeClient(announce_recalc_policy(comply_after_nudge=False))
+    events: list[dict] = []
+    result = agent.run_issue(
+        RECALC_DAY, mode="agent", emit=events.append, client=client
+    )
+    assert result["version"] == 2
+    assert _nudges(client) == 1
+    decision = _decisions(events)
+    assert len(decision) == 1
+    assert decision[0]["meta"]["by"] == "rule"
+    assert decision[0]["meta"]["decision"] == "recalc"
+    assert decision[0]["title"].startswith(
+        "LLM не вызвал инструмент — решение по правилу: сдвиг"
+    )
+    assert decision[0]["title"].endswith("больше порога, пересчитываю")
+    assert not [
+        e for e in events if e["meta"].get("by") == "llm" and e["meta"].get("decision")
+    ]
+    assert sorted(store.load_record(RECALC_DAY)["versions"]) == ["1", "2"]
+    assert events[-1]["title"] == "Итог: опубликована v2 — пересчёт на свежем прогоне"
+
+
+def test_llm_explicit_keep_stays_its_own_decision():
+    def keep(messages):
+        calls, results = _history(messages)
+        if (
+            calls
+            and calls[-1] == "fetch_weather"
+            and results[-1].get("current_version")
+        ):
+            return "Оставляю v1: риски те же, для заявки на сутки её достаточно.", []
+        return dispatcher_policy()(messages)
+
+    client = FakeClient(keep)
+    events: list[dict] = []
+    result = agent.run_issue(
+        RECALC_DAY, mode="agent", emit=events.append, client=client
+    )
+    assert result["version"] == 1
+    assert _nudges(client) == 0
+    decision = _decisions(events)
+    assert len(decision) == 1
+    assert decision[0]["meta"]["by"] == "llm"
+    assert decision[0]["meta"]["decision"] == "keep"
+    assert "recalc_forecast" not in _tool_calls(events)
+
+
+@pytest.mark.parametrize(
+    ("text", "intent"),
+    [
+        (
+            (
+                "Пересчитываю: прогон свежее текущего, все инициализации до T, а средний "
+                "сдвиг ветра за 1–24 ч = 0.92 м/с, что выше порога 0.5 м/с."
+            ),
+            True,
+        ),
+        ("Нужен пересчёт: появился новый риск обледенения.", True),
+        ("Пересчитываю, v1 остаётся для сравнения.", True),
+        ("Пересчёт не нужен: сдвиг 0,3 м/с меньше порога.", False),
+        ("Сдвиг 0,9 м/с, но пересчитывать не буду: риски те же.", False),
+        ("Сдвиг ветра мал, новых рисков нет — v1 остаётся.", False),
+        ("Готово.", None),
+    ],
+)
+def test_recalc_intent_reads_the_llm_text(text, intent):
+    assert agent.recalc_intent(text) is intent
