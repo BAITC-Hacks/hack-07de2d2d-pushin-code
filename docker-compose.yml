@@ -1,0 +1,32 @@
+# Windcast from a clean clone — the way the jury starts it:
+#   cp .env.example .env        # optional; without OPENAI_API_KEY the agent runs deterministically
+#   docker compose up --build
+#   open http://localhost:8080  # UI, /api/* and /health behind one proxy
+#
+# No env_file on purpose: compose reads .env only to fill the ${...} values below and starts
+# fine when .env is absent. The shared production host uses infra/docker-compose.hosted.yml.
+services:
+  backend:
+    build:
+      context: .                      # the image needs data/, models/ and outputs/ from the root
+      dockerfile: backend/Dockerfile
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    ports: ["8000:8000"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: frontend
+    ports: ["3000:3000"]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2.11.4-alpine
+    volumes:
+      - ./infra/Caddyfile.local:/etc/caddy/Caddyfile:ro
+    ports: ["8080:8080"]
+    depends_on: [backend, frontend]
+    restart: unless-stopped

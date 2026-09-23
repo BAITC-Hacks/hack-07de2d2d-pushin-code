@@ -7,7 +7,9 @@
 # Run from repo root:  docker compose -f infra/docker-compose.hosted.yml --env-file .env up -d --build
 services:
   backend:
-    build: ../backend
+    build:
+      context: ..                     # repo root: the image needs data/, models/, outputs/
+      dockerfile: backend/Dockerfile
     env_file: ../.env
     restart: unless-stopped
     ports: ["127.0.0.1:8100:8000"]

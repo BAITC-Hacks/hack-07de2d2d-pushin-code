@@ -1,0 +1,16 @@
+# Local entry point for the root docker-compose.yml: http://localhost:8080.
+# Same routes as infra/Caddyfile, without the domain and TLS. No `encode` here: nothing to
+# gain on localhost, and the SSE stream of agent steps stays unbuffered.
+http://:8080 {
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			flush_interval -1 # SSE: stream immediately
+		}
+	}
+	handle /health {
+		reverse_proxy backend:8000
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
