@@ -20,15 +20,15 @@ function Journal({ entries, error }) {
   return (
     <section className="journal" id="live-journal">
       <h3>Журнал агента</h3>
-      <p className="journal-sub">Каждые 30 минут агент сам проверяет, не вышел ли новый прогон погоды, и решает, пересчитывать ли выпуск.</p>
+      <p className="journal-sub">Каждые 30 минут агент сам проверяет новый прогон погоды и решает, пересчитывать ли выпуск.</p>
       {error && <p className="state-error">{error}</p>}
       {!error && entries.length === 0 && <p className="feed-empty">Записей пока нет — первая появится после проверки агентом.</p>}
       <ol>
         {entries.map((entry) => (
-          <li key={`${entry.ts}-${entry.run_id}`} className={`jr jr-${entry.outcome}`}>
+          <li key={`${entry.ts}-${entry.run_id}`} className={`jr jr-${entry.outcome}`} title={`${entry.title || ''}${entry.version ? ` · версия ${entry.version}` : ''}`}>
             <time>{localStamp(entry.ts)}</time>
-            <span className={`who who-${entry.initiator}`}>{entry.initiator === 'agent' ? 'агент сам' : 'по кнопке'}</span>
-            <span className="jr-outcome">{OUTCOME[entry.outcome] || entry.outcome}{entry.version ? ` v${entry.version}` : ''}</span>
+            <span className={`who who-${entry.initiator}`}>{entry.initiator === 'agent' ? 'агент' : 'по кнопке'}</span>
+            <span className="jr-outcome">{OUTCOME[entry.outcome] || entry.outcome}</span>
             <span className="jr-title">{entry.title}</span>
           </li>
         ))}
@@ -76,7 +76,7 @@ export default function Live({ api, active }) {
               <div><dt>Сейчас</dt><dd>{status ? localStamp(status.now_local) : '—'}</dd></div>
               <div><dt>Последний прогон</dt><dd>{status ? utcLabel(status.latest_run_utc) : '—'}</dd></div>
               <div><dt>Следующий будет доступен</dt><dd>{status ? `${localStamp(status.next_run_available_local)} мест.` : '—'}</dd></div>
-              <div><dt>Текущий выпуск</dt><dd>{cur ? `v${cur.version} от ${localStamp(cur.issued_at_local)}` : 'ещё нет'}</dd></div>
+              <div><dt>Текущий выпуск</dt><dd title={cur ? `версия ${cur.version}` : undefined}>{cur ? `от ${localStamp(cur.issued_at_local)}${cur.version > 1 ? ' · пересчитан' : ''}` : 'ещё нет'}</dd></div>
             </dl>
           )}
           {cur?.weather_run_utc && status?.latest_run_utc && Date.parse(cur.weather_run_utc) < Date.parse(status.latest_run_utc) && (
@@ -95,18 +95,18 @@ export default function Live({ api, active }) {
             <div>
               <h1>Прогноз ВЭС на ближайшие 48 часов</h1>
               <p className="issue-sub">
-                {forecast ? <>от {localFromUtc(forecast.issue_time_utc)} по Астане · версия {forecast.version}</> : 'Open-Meteo Forecast, последний опубликованный прогон'}
+                {forecast ? <span title={`версия ${forecast.version}`}>Сделан {localFromUtc(forecast.issue_time_utc)} по Астане · 48 часов{forecast.version > 1 ? ' · пересчитан после нового прогноза погоды' : ''}</span> : 'Open-Meteo Forecast, последний опубликованный прогон'}
               </p>
             </div>
           </header>
-          {forecast?.change_note && <p className="change-note"><b>Что изменилось:</b> {forecast.change_note}</p>}
+          {forecast?.change_note && <p className="change-note">Пересчёт после нового прогноза погоды: {String(forecast.change_note).replace(/\s*против v\d+/, '')}.</p>}
           <div className="chart-card">
             {forecast ? (
               <>
                 <ForecastChart rows={forecast.rows} flags={forecast.flags} />
                 <div className="legend">
-                  <span><i className="lg-p50" />P50, медиана</span>
-                  <span><i className="lg-band" />P10–P90</span>
+                  <span><i className="lg-p50" />P50</span>
+                  <span><i className="lg-band" />коридор P10–P90</span>
                   <span><i className="lg-wind" />ветер</span>
                 </div>
               </>

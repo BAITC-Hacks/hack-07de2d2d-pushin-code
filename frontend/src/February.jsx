@@ -3,7 +3,7 @@ import AgentPanel from './AgentPanel';
 import ForecastChart from './ForecastChart';
 import useAgentRun from './useAgentRun';
 import { ApiError, createSelectionLoader, weatherRunIsBeforeIssue } from './api';
-import { FLAG_KINDS, dayLabel, rangeLabel, localFromUtc, localStamp, nextDay, pct, shortDate, utcLabel, weekday } from './format';
+import { dayLabel, rangeLabel, localFromUtc, localStamp, nextDay, pct, shortDate, utcLabel, weekday } from './format';
 
 const TURBINES = [
   { key: 'plant', label: 'ВЭС' },
@@ -19,6 +19,50 @@ function errorText(error) {
 
 function flagTotal(flags) {
   return Object.values(flags || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+
+// Three numbers the jury reads first: peak, minimum and mean of P50 over the window.
+export function issueStats(rows) {
+  const valid = (rows || []).filter((row) => Number.isFinite(row?.p50));
+  if (!valid.length) return null;
+  const peak = valid.reduce((best, row) => (row.p50 > best.p50 ? row : best));
+  const low = valid.reduce((best, row) => (row.p50 < best.p50 ? row : best));
+  const mean = valid.reduce((sum, row) => sum + row.p50, 0) / valid.length;
+  return { peak, low, mean };
+}
+
+function signedPp(value) {
+  if (!value) return 'без изменений';
+  return `${value > 0 ? '+' : '−'}${Math.abs(value)} п.п.`;
+}
+
+// One plain sentence instead of «v2 против v1: …».
+export function recalcNote(current, previous) {
+  if (!current?.change_note) return null;
+  const wind = String(current.change_note).match(/ветер\s+([+−-]?\d+(?:,\d+)?)\s*м\/с/);
+  const now = issueStats(current.rows);
+  const before = previous ? issueStats(previous.rows) : null;
+  let effect;
+  if (now && before) {
+    const meanPp = Math.round((now.mean - before.mean) * 100);
+    const peakPp = Math.round((now.peak.p50 - before.peak.p50) * 100);
+    effect = `средняя выработка ${signedPp(meanPp)}, пик ${signedPp(peakPp)}`;
+  } else {
+    effect = String(current.change_note).replace(/\s*против v\d+/, '').replace(/^ветер[^→]*→\s*/, '');
+  }
+  const cause = wind ? `Ветер ${wind[1]} м/с → ${effect}.` : `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
+  return `Пересчёт после нового прогноза погоды. ${cause}${previous ? ' Первый расчёт показан пунктиром.' : ''}`;
+}
+
+// «Спад −75 % за 4 ч · 14.02 03–07» from the backend text.
+export function riskLine(flag) {
+  const [what = '', when = ''] = String(flag?.text || '').split(' · ');
+  let head = what;
+  if (flag?.kind === 'ice') head = `Обледенение ${what.replace(/^риск обледенения:\s*t от\s*/, '').replace(/\s+до\s+/, '…')}`;
+  else if (flag?.kind === 'wind_gt20') head = what.replace(/\s*—.*$/, '').replace(/^ветер/, 'Ветер');
+  else if (flag?.kind === 'models_diverge') head = what.replace(/^погодные модели расходятся/, 'Модели расходятся');
+  else head = what.charAt(0).toUpperCase() + what.slice(1);
+  return { head: head.trim(), range: when.replace(/(\d{2}):00/g, '$1').trim() };
 }
 
 function Calendar({ issues, selected, onSelect, playing }) {
@@ -43,7 +87,7 @@ function Calendar({ issues, selected, onSelect, playing }) {
             <span className="day-num">{Number(issue.issue_date.slice(8, 10))}</span>
             <span className="day-marks">
               {flags > 0 && <i className="mark-flag" aria-label="есть риски" />}
-              {recalculated && <b>v{issue.version}</b>}
+              {recalculated && <i className="mark-recalc" aria-label="был пересчёт" />}
             </span>
           </button>
         );
@@ -103,17 +147,26 @@ function Provenance({ forecast }) {
 }
 
 function FlagList({ flags }) {
-  if (!flags.length) return <p className="flags-none">Рисков в окне не найдено.</p>;
+  const [open, setOpen] = useState(false);
+  if (!flags.length) return <p className="flags-none">Рисков в окне нет.</p>;
+  const shown = open ? flags : flags.slice(0, 4);
+  const hidden = flags.length - shown.length;
   return (
-    <ul className="flags">
-      {flags.map((flag, index) => (
-        <li key={`${flag.kind}-${index}`} className={`flag-item flag-${flag.kind}`}>
-          <i />
-          <span className="flag-kind">{FLAG_KINDS[flag.kind]?.label || flag.kind}</span>
-          <span className="flag-text">{flag.text}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="flags">
+        {shown.map((flag, index) => {
+          const { head, range } = riskLine(flag);
+          return (
+            <li key={`${flag.kind}-${index}`} className={`flag-item flag-${flag.kind}`} title={flag.text}>
+              <i />
+              <span className="flag-kind">{head}</span>
+              <span className="flag-text">{range}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {hidden > 0 && <button type="button" className="link more" onClick={() => setOpen(true)}>+ ещё {hidden}</button>}
+    </>
   );
 }
 
@@ -200,6 +253,8 @@ export default function February({ api, active }) {
   const previous = selection.data?.previous;
   const issue = issues.find((item) => item.issue_date === selected);
   const moment = nextDay(selected);
+  const stats = useMemo(() => issueStats(current?.rows), [current]);
+  const note = useMemo(() => recalcNote(current, previous), [current, previous]);
 
   return (
     <div className={`view view-feb${active ? '' : ' hidden'}`}>
@@ -223,17 +278,22 @@ export default function February({ api, active }) {
           <Calendar issues={issues} selected={selected} onSelect={(day) => !playing && setSelected(day)} playing={playing} />
         )}
         <p className="calendar-legend">
-          Высота столбика — средняя прогнозная выработка ВЭС. <i className="mark-flag" /> есть риски · <b>v2</b> агент пересчитал по свежему прогону.
+          высота — средняя выработка · <i className="mark-flag" /> — риски · <i className="mark-recalc" /> — был пересчёт
         </p>
 
         <section className="issue">
           <header className="issue-head">
             <div>
-              <h1>Выпуск на {moment ? rangeLabel(moment, nextDay(moment)) : '—'}</h1>
-              <p className="issue-sub">
+              <h1>
+                Выпуск на {moment ? rangeLabel(moment, nextDay(moment)) : '—'}
+                {current && (
+                  <span className={`pill${current.versions?.length > 1 ? ' pill-recalc' : ''}`} title={`версия ${current.version}${current.versions?.length > 1 ? ` из ${current.versions.length}` : ''}${current.model_version ? ` · ${current.model_version}` : ''}`}>
+                    {current.versions?.length > 1 ? 'пересчитан после нового прогноза погоды' : 'первый расчёт'}
+                  </span>
+                )}
+              </h1>
+              <p className="issue-sub" title={current?.model_version ? `модель ${current.model_version}` : undefined}>
                 Сделан {moment ? `${shortDate(moment)} в 00:00` : '—'} по Астане · 48 часов
-                {current && <> · версия {current.version}{current.versions?.length > 1 ? ` из ${current.versions.length}` : ''}</>}
-                {current?.model_version && <> · <code>{current.model_version}</code></>}
               </p>
             </div>
             <div className="seg" role="radiogroup" aria-label="Объект" id="turbine-switch">
@@ -245,9 +305,15 @@ export default function February({ api, active }) {
             </div>
           </header>
 
-          {current?.change_note && (
-            <p className="change-note"><b>v{current.version} против v{current.version - 1}:</b> {current.change_note}</p>
+          {stats && (
+            <div className="stats" id="issue-stats">
+              <div><span className="stat-v">Пик {pct(stats.peak.p50)}</span><span className="stat-l">{localStamp(stats.peak.target_time_local)}</span></div>
+              <div><span className="stat-v">Минимум {pct(stats.low.p50)}</span><span className="stat-l">{localStamp(stats.low.target_time_local)}</span></div>
+              <div><span className="stat-v">Средняя {pct(stats.mean)}</span><span className="stat-l">за 48 часов</span></div>
+            </div>
           )}
+
+          {note && <p className="change-note">{note}</p>}
 
           <div className="chart-card" id="forecast-chart">
             {selection.error ? (
@@ -258,9 +324,9 @@ export default function February({ api, active }) {
                   <ForecastChart rows={current.rows} previousRows={previous?.rows || null} flags={current.flags} />
                 </div>
                 <div className="legend">
-                  <span><i className="lg-p50" />P50, медиана</span>
-                  <span><i className="lg-band" />P10–P90, 8 из 10 исходов</span>
-                  {previous && <span><i className="lg-prev" />v{previous.version}, до пересчёта</span>}
+                  <span><i className="lg-p50" />P50</span>
+                  <span><i className="lg-band" />коридор P10–P90</span>
+                  {previous && <span><i className="lg-prev" />первый расчёт</span>}
                   <span><i className="lg-wind" />ветер</span>
                 </div>
               </>

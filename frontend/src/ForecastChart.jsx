@@ -27,8 +27,8 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
   const x = (index) => PAD.left + (count > 1 ? index * step : innerW / 2);
   const y = (value) => PAD.top + (1 - value) * height;
   const kinds = [...new Set(flags.map((flag) => flag.kind))];
-  const flagSpace = kinds.length ? kinds.length * 7 + 6 : 0;
-  const windH = showWind ? 86 : 0;
+  const flagSpace = kinds.length ? 12 : 0;
+  const windH = showWind ? 60 : 0;
   const windTop = PAD.top + height + flagSpace + (showWind ? GAP + 18 : 0);
   const windMax = useMemo(() => {
     const max = Math.max(WIND_NOMINAL_MS + 2, ...rows.map((row) => Number(row.wind_fc_ms) || 0));
@@ -63,7 +63,6 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
   });
 
   const hovered = hover !== null ? rows[hover] : null;
-  const prevAtHover = hover !== null && series.prev ? series.prev[hover] : null;
 
   const onMove = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -96,10 +95,9 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
           const { from, to } = flagWindow(flag, count);
           const x0 = Math.max(PAD.left, x(from - 1) - step / 2);
           const x1 = Math.min(width - PAD.right, x(to - 1) + step / 2);
-          const lane = kinds.indexOf(flag.kind);
           return (
             <g key={`${flag.kind}-${index}`} className={`flag flag-${flag.kind}`}>
-              <rect className="flag-tick" x={x0 + 1} width={Math.max(3, x1 - x0 - 2)} y={PAD.top + height + 5 + lane * 7} height={4} rx={2} />
+              <rect className="flag-tick" x={x0 + 1} width={Math.max(3, x1 - x0 - 2)} y={PAD.top + height + 5} height={3} rx={1.5} />
               <title>{flag.text || FLAG_KINDS[flag.kind]?.label || flag.kind}</title>
             </g>
           );
@@ -154,11 +152,9 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
           </div>
           <dl>
             <dt>P50</dt><dd className="strong">{formatPercent(hovered.p50)}</dd>
-            <dt>P10–P90</dt><dd>{formatPercent(hovered.p10)} – {formatPercent(hovered.p90)}</dd>
-            {Number.isFinite(prevAtHover) && (<><dt>прошлая версия</dt><dd>{formatPercent(prevAtHover)}</dd></>)}
+            <dt>коридор</dt><dd>{formatPercent(hovered.p10)} – {formatPercent(hovered.p90)}</dd>
             {showActual && Number.isFinite(hovered.actual) && (<><dt>факт</dt><dd>{formatPercent(hovered.actual)}</dd></>)}
-            {Number.isFinite(hovered.wind_fc_ms) && (<><dt>ветер</dt><dd>{formatNumber(hovered.wind_fc_ms)} м/с</dd></>)}
-            {Number.isFinite(hovered.temp_fc_c) && (<><dt>температура</dt><dd>{formatNumber(hovered.temp_fc_c)} °C</dd></>)}
+            {showWind && Number.isFinite(hovered.wind_fc_ms) && (<><dt>ветер</dt><dd>{formatNumber(hovered.wind_fc_ms)} м/с</dd></>)}
           </dl>
         </div>
       )}
