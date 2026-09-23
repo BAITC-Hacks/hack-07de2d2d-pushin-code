@@ -7,6 +7,8 @@ through windcast.runs (background thread + SSE).
 
     PYTHONPATH=backend uvicorn windcast.api:app --port 8000     # one worker: runs live in memory
 
+On startup the live watcher (windcast.watcher, LIVE_WATCH_MINUTES) begins checking the weather.
+
 Every 4xx is {"error": "<текст по-русски>"}; unexpected failures are 500 with the same shape.
 """
 
@@ -16,7 +18,8 @@ import csv
 import importlib
 import io
 import json
-import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
@@ -28,11 +31,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException
 
-from windcast import paths, runs, timeline
+from windcast import paths, runs, timeline, watcher
 
 LIVE = "live"
 MODES = ("agent", "deterministic")
 TRIGGERS = ("issue", "new_weather_run")
+JOURNAL_MAX = 200
 TURBINE_FILTERS = ("all", "plant", "1", "2")
 FLAG_KINDS = ("ramp", "ice", "wind_gt20", "models_diverge")
 CSV_COLUMNS = (
@@ -62,6 +66,16 @@ _DEFAULT_ERRORS = {
     405: "Метод не поддерживается",
 }
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    watcher.start()  # off when LIVE_WATCH_MINUTES=0
+    try:
+        yield
+    finally:
+        watcher.stop()
+
+
 app = FastAPI(
     title="Windcast API",
     version="0.3",
@@ -70,6 +84,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
     redoc_url=None,
+    lifespan=_lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -181,22 +196,17 @@ def _choice(value: Any, choices: tuple[str, ...], name: str, default: str) -> st
     return text
 
 
-def _has_openai_key() -> bool:
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
-    return (
-        bool(key) and "..." not in key
-    )  # the placeholder from .env.example is not a key
-
-
-def _default_mode() -> str:
-    return "agent" if _has_openai_key() else "deterministic"
-
-
 def _mode_param(value: Any) -> str:
-    mode = _choice(value, MODES, "mode", _default_mode())
-    if mode == "agent" and not _has_openai_key():
+    mode = _choice(value, MODES, "mode", runs.default_mode())
+    if mode == "agent" and not runs.has_openai_key():
         return "deterministic"  # contract §5: without OPENAI_API_KEY the agent is deterministic
     return mode
+
+
+def _scenario_param(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    return _choice(value, runs.SCENARIOS, "scenario", "")
 
 
 async def _json_body(request: Request) -> dict:
@@ -259,8 +269,14 @@ def _record_path(issue: str) -> Path:
 
 def _trace_path(issue: str) -> Path:
     if issue == LIVE:
-        return paths.live_dir() / "latest.jsonl"
+        return paths.live_dir() / "latest_trace.jsonl"
     return paths.traces_dir() / f"{issue}.jsonl"
+
+
+def _csv_path(issue: str) -> Path:
+    if issue == LIVE:
+        return paths.live_dir() / "latest.csv"
+    return paths.forecasts_dir() / f"{issue}.csv"
 
 
 def _versions(record: dict) -> dict[int, dict]:
@@ -580,9 +596,10 @@ def health() -> dict[str, Any]:
     ready = sum(1 for d in timeline.issue_dates() if _load_record(d.isoformat()))
     return {
         "ok": True,
-        "mode": _default_mode(),
+        "mode": runs.default_mode(),
         "model_version": _model_version(),
         "issues_ready": ready,
+        **watcher.status(),
     }
 
 
@@ -621,7 +638,7 @@ def live_forecast(version: str = "latest", turbine: str = "all") -> dict[str, An
 def forecast_csv(issue_date: str, version: str = "latest") -> Response:
     issue = _issue_param(issue_date)
     wanted = _version_param(version)
-    csv_file = None if issue == LIVE else paths.forecasts_dir() / f"{issue}.csv"
+    csv_file = _csv_path(issue)
     record = _load_record(issue)
     if record is None:  # a CSV without a record (e.g. from the CLI) is still served
         data = _read_bytes(csv_file) if csv_file and wanted is None else None
@@ -664,7 +681,8 @@ async def create_run(request: Request) -> dict[str, str]:
         issue = day.isoformat()
     mode = _mode_param(body.get("mode"))
     trigger = _choice(body.get("trigger"), TRIGGERS, "trigger", "issue")
-    run = runs.start_issue(issue, mode=mode, trigger=trigger)
+    scenario = _scenario_param(body.get("scenario"))
+    run = runs.start_issue(issue, mode=mode, trigger=trigger, scenario=scenario)
     return {"id": run.id}
 
 
@@ -768,6 +786,14 @@ def live_status() -> dict[str, Any]:
         ),
         "current": _live_current(),
     }
+
+
+@app.get("/api/live/journal")
+def live_journal(limit: str = "20") -> list[dict[str, Any]]:
+    text = limit.strip()
+    if not text.isdigit() or not 1 <= int(text) <= JOURNAL_MAX:
+        _fail(400, f"Неверный limit «{limit}»: число от 1 до {JOURNAL_MAX}")
+    return runs.read_journal(int(text))
 
 
 # --- §6.6 quality (January) ---------------------------------------------------------------

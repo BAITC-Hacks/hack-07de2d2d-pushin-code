@@ -4,6 +4,7 @@ A run calls RUNNER(issue_date, mode=..., trigger=..., emit=...) in a daemon thre
 the runner emits is numbered, stored in memory and pushed to every SSE subscriber. The last
 event of a run is always a verdict (added here if the runner did not emit one), so the stream
 can close after it. A backtest is one run that calls RUNNER for each date in turn.
+Every finished live run appends one line to the journal outputs/live/journal.jsonl (§6.5).
 
 Runs live in memory only: serve the API with ONE uvicorn worker. Published results survive in
 outputs/ (the agent writes them); a restart only forgets in-flight streams.
@@ -15,6 +16,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import threading
 import uuid
 from collections import OrderedDict
@@ -25,7 +27,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from windcast import timeline
+from windcast import paths, timeline
 
 log = logging.getLogger("windcast.runs")
 
@@ -36,6 +38,10 @@ RETRY_MS = 3000  # EventSource reconnect delay
 MAX_RUNS = 200  # finished runs beyond this are forgotten, oldest first
 
 AGENT_MISSING = "Агент ещё не подключён"
+LIVE = "live"
+SCENARIOS = ("weather_outage",)
+INITIATORS = ("user", "agent")
+JOURNAL_OUTCOMES = ("published", "kept", "refused", "error")
 
 
 class AgentUnavailable(RuntimeError):
@@ -52,6 +58,17 @@ def _default_runner(issue_date: str, *, mode: str, trigger: str, emit: Emit) -> 
 
 # Tests replace this with a fake; looked up at call time.
 RUNNER: Callable[..., Any] = _default_runner
+
+
+def has_openai_key() -> bool:
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    # the placeholder from .env.example ("sk-...") is not a key
+    return bool(key) and "..." not in key
+
+
+def default_mode() -> str:
+    """Contract §5: without OPENAI_API_KEY the agent runs deterministically."""
+    return "agent" if has_openai_key() else "deterministic"
 
 
 def jsonable(obj: Any) -> Any:
@@ -101,6 +118,8 @@ class Run:
     mode: str
     date_from: str | None = None
     date_to: str | None = None
+    scenario: str | None = None  # None | "weather_outage"
+    initiator: str = "user"  # "user" (POST) | "agent" (the live watcher)
     created_at: str = field(default_factory=now_local_iso)
     current_issue: str | None = None
     version: int | None = None
@@ -188,6 +207,8 @@ class Run:
                 "version": self.version,
                 "events": list(self.events),
                 "kind": self.kind,
+                "scenario": self.scenario,
+                "initiator": self.initiator,
                 "created_at": self.created_at,
             }
             if self.kind == "backtest":
@@ -217,6 +238,15 @@ def reset() -> None:
 def get(run_id: str) -> Run | None:
     with _REGISTRY_LOCK:
         return _REGISTRY.get(run_id)
+
+
+def active_run(issue_date: str) -> Run | None:
+    """The unfinished run working on this issue date, if any."""
+    with _REGISTRY_LOCK:
+        for run in _REGISTRY.values():
+            if run.kind == "issue" and not run.done and run.issue_date == issue_date:
+                return run
+    return None
 
 
 def running_issue_dates() -> set[str]:
@@ -252,16 +282,26 @@ def _start(run: Run, target: Callable[..., None], *args: Any) -> None:
     thread.start()
 
 
-def start_issue(issue_date: str, *, mode: str, trigger: str) -> Run:
-    """Start (or join, if the same one is already running) a run for one issue."""
+def start_issue(
+    issue_date: str,
+    *,
+    mode: str,
+    trigger: str,
+    scenario: str | None = None,
+    initiator: str = "user",
+    only_if_idle: bool = False,
+) -> Run | None:
+    """Start (or join, if the same one is already running) a run for one issue.
+
+    only_if_idle: return None instead when any run for this issue date is unfinished.
+    """
     with _REGISTRY_LOCK:
         for run in _REGISTRY.values():
-            if (
-                run.kind == "issue"
-                and not run.done
-                and (run.issue_date, run.trigger, run.mode)
-                == (issue_date, trigger, mode)
-            ):
+            if run.kind != "issue" or run.done or run.issue_date != issue_date:
+                continue
+            if only_if_idle:
+                return None
+            if (run.trigger, run.mode, run.scenario) == (trigger, mode, scenario):
                 return run
         run = Run(
             id=_new_id(),
@@ -269,6 +309,8 @@ def start_issue(issue_date: str, *, mode: str, trigger: str) -> Run:
             issue_date=issue_date,
             trigger=trigger,
             mode=mode,
+            scenario=scenario,
+            initiator=initiator,
             current_issue=issue_date,
         )
         _register(run)
@@ -317,7 +359,7 @@ def _issue_lock(run: Run, issue_date: str, emit: Emit) -> Iterator[None]:
             {
                 "type": "thought",
                 "title": f"Жду: по выпуску {issue_date} уже идёт другой прогон",
-                "meta": {"status": "skip"},
+                "meta": {"status": "skip", "origin": "api"},
             }
         )
         lock.acquire()
@@ -338,10 +380,11 @@ def _version_of(result: Any) -> int | None:
 
 
 def _call_runner(run: Run, issue_date: str, trigger: str, emit: Emit) -> int | None:
+    kwargs: dict[str, Any] = {"mode": run.mode, "trigger": trigger, "emit": emit}
+    if run.scenario is not None:  # older runners know no scenario keyword
+        kwargs["scenario"] = run.scenario
     with _issue_lock(run, issue_date, emit):
-        return _version_of(
-            RUNNER(issue_date, mode=run.mode, trigger=trigger, emit=emit)
-        )
+        return _version_of(RUNNER(issue_date, **kwargs))
 
 
 def _error_event(exc: BaseException) -> dict:
@@ -350,14 +393,14 @@ def _error_event(exc: BaseException) -> dict:
             "type": "error",
             "title": AGENT_MISSING,
             "body": f"Модуль windcast.agent недоступен: {exc}",
-            "meta": {"status": "error"},
+            "meta": {"status": "error", "origin": "api"},
         }
     title = "Запрос отклонён" if isinstance(exc, ValueError) else "Ошибка агента"
     return {
         "type": "error",
         "title": title,
         "body": f"{type(exc).__name__}: {exc}",
-        "meta": {"status": "error"},
+        "meta": {"status": "error", "origin": "api"},
     }
 
 
@@ -374,7 +417,7 @@ def _close_issue(
                 "type": "verdict",
                 "title": "Выпуск не выполнен",
                 "body": "Подробности — в событии об ошибке выше.",
-                "meta": {"status": "error"},
+                "meta": {"status": "error", "origin": "api"},
             }
         )
     else:
@@ -383,7 +426,7 @@ def _close_issue(
                 "type": "verdict",
                 "title": "Прогон завершён",
                 "body": f"Версия {version}" if version is not None else "",
-                "meta": {"status": "ok", "version": version},
+                "meta": {"status": "ok", "version": version, "origin": "api"},
             }
         )
 
@@ -403,6 +446,10 @@ def _execute_issue(run: Run) -> None:
     finally:
         try:
             _close_issue(run.emit, run, 0, version, failed)
+            if run.issue_date == LIVE:
+                append_journal(journal_entry(run, version, failed))
+        except Exception:  # the journal must never keep a run from finishing
+            log.exception("run %s: closing failed", run.id)
         finally:
             run.finish(version)
 
@@ -455,6 +502,98 @@ def _execute_backtest(run: Run, days: list[str]) -> None:
             }
         )
         run.finish(None)
+
+
+# --- live journal (§6.5) -------------------------------------------------------------------
+
+_JOURNAL_LOCK = threading.Lock()
+
+
+def journal_path() -> Path:
+    return paths.live_dir() / "journal.jsonl"
+
+
+def _meta(event: dict | None) -> dict:
+    meta = (event or {}).get("meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def _last(events: list[dict], match: Callable[[dict], bool]) -> dict | None:
+    """The last matching event, preferring the agent's own over those the API added."""
+    found = [e for e in events if match(e)]
+    own = [e for e in found if _meta(e).get("origin") != "api"]
+    return (own or found or [None])[-1]
+
+
+def _headline(title: Any) -> str:
+    text = str(title or "").strip()
+    if text.lower().startswith("итог:"):
+        text = text[5:].strip()
+    return text[:1].upper() + text[1:]
+
+
+def journal_entry(run: Run, version: int | None, failed: bool) -> dict:
+    """One journal line: what the run decided, in the agent's own words."""
+    events, _ = run.snapshot(0)
+    verdicts = [e for e in events if e.get("type") == "verdict"]
+    verdict = _last(events, lambda e: e.get("type") == "verdict")
+    refusal = _last(
+        events,
+        lambda e: (
+            e.get("type") == "tool_result"
+            and _meta(e).get("tool") == "recalc_forecast"
+            and _meta(e).get("status") == "skip"
+        ),
+    )
+    decision = _last(events, lambda e: _meta(e).get("decision") in ("keep", "recalc"))
+    if failed or not verdicts or _meta(verdicts[-1]).get("status") == "error":
+        outcome = "error"  # the agent's own verdict, else the most specific error
+        own = [e for e in verdicts if _meta(e).get("origin") != "api"]
+        error = _last(events, lambda e: e.get("type") == "error")
+        chosen = (own or [None])[-1] or error or verdict
+    elif any(e.get("type") == "action" for e in events):
+        outcome, chosen = "published", verdict
+    elif refusal is not None or "отказ" in str((verdict or {}).get("title")).lower():
+        outcome, chosen = "refused", refusal or verdict
+    else:
+        outcome, chosen = "kept", decision or verdict
+    if version is None and isinstance(_meta(verdict).get("version"), int):
+        version = _meta(verdict)["version"]
+    return {
+        "ts": now_local_iso(),
+        "initiator": run.initiator,
+        "trigger": run.trigger,
+        "run_id": run.id,
+        "outcome": outcome,
+        "version": version,
+        "title": _headline((chosen or {}).get("title")) or "Ошибка агента",
+    }
+
+
+def append_journal(entry: dict) -> None:
+    line = json.dumps(jsonable(entry), ensure_ascii=False) + "\n"
+    path = journal_path()
+    with _JOURNAL_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+
+
+def read_journal(limit: int) -> list[dict]:
+    """Newest first; [] when there is no journal yet."""
+    try:
+        text = journal_path().read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return []
+    entries = []
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(jsonable(entry))
+    return entries[::-1][:limit]
 
 
 # --- SSE ----------------------------------------------------------------------------------

@@ -18,7 +18,7 @@ pytest.importorskip("httpx")
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
-from windcast import api, runs, timeline
+from windcast import api, runs, timeline, watcher
 
 ISSUE = "2026-02-13"
 
@@ -191,6 +191,7 @@ METRICS = {
 @pytest.fixture()
 def root(tmp_path, monkeypatch):
     monkeypatch.setenv("WINDCAST_ROOT", str(tmp_path))
+    monkeypatch.setenv("LIVE_WATCH_MINUTES", "0")  # never start the real watcher here
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     forecasts = tmp_path / "outputs" / "forecasts"
     traces = tmp_path / "outputs" / "traces"
@@ -211,7 +212,9 @@ def root(tmp_path, monkeypatch):
         json.dumps(METRICS, ensure_ascii=False), encoding="utf-8"
     )
     runs.reset()
+    watcher.reset()
     yield tmp_path
+    watcher.reset()
     runs.reset()
 
 
@@ -240,6 +243,8 @@ def test_health_counts_records_and_reads_model_version(client, monkeypatch):
         "mode": "deterministic",
         "model_version": "lgbm-q-test",
         "issues_ready": 1,  # 13.02 only; the half-written 14.02 does not count
+        "live_watch_minutes": 0,
+        "live_last_check_local": None,
     }
 
 
@@ -840,3 +845,46 @@ def test_events_are_plain_json_in_schema_order(client, monkeypatch):
         "when": "2026-02-13T19:00:00+00:00",
     }
     assert [e["seq"] for e in events] == [1, 2]  # the stream numbers events itself
+
+
+# --- v0.5: scenario, live trace ---------------------------------------------------------------
+
+
+def test_run_scenario_is_passed_only_when_set(client, monkeypatch):
+    seen = []
+
+    def runner(issue_date, *, mode, trigger, emit, **kwargs):
+        seen.append(kwargs)
+        emit({"type": "verdict", "title": "ok"})
+        return {"version": 1}
+
+    monkeypatch.setattr(runs, "RUNNER", runner)
+    rid = client.post(
+        "/api/runs", json={"issue_date": ISSUE, "scenario": "weather_outage"}
+    ).json()["id"]
+    assert _wait_done(client, rid)["scenario"] == "weather_outage"
+    rid = client.post("/api/runs", json={"issue_date": ISSUE, "scenario": None}).json()[
+        "id"
+    ]
+    assert _wait_done(client, rid)["scenario"] is None
+    assert seen == [{"scenario": "weather_outage"}, {}]
+
+
+def test_run_without_scenario_keeps_old_runners_working(client, monkeypatch):
+    monkeypatch.setattr(runs, "RUNNER", _fake_runner([]))  # knows no scenario keyword
+    rid = client.post("/api/runs", json={"issue_date": ISSUE}).json()["id"]
+    assert _wait_done(client, rid)["version"] == 2
+
+
+def test_run_bad_scenario_is_400(client):
+    text = _error(
+        client.post("/api/runs", json={"issue_date": ISSUE, "scenario": "flood"}), 400
+    )
+    assert "weather_outage" in text
+
+
+def test_live_trace_is_read_from_the_store_path(client, root):
+    trace = root / "outputs" / "live" / "latest_trace.jsonl"
+    trace.write_text(json.dumps(TRACE[0], ensure_ascii=False) + "\n", encoding="utf-8")
+    body = client.get("/api/traces/live").json()
+    assert body["issue_date"] == "live" and len(body["events"]) == 1
