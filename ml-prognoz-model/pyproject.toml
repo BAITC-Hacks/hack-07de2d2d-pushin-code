@@ -20,6 +20,9 @@ dependencies = [
 weather = ["eccodes>=2.40,<3", "eccodeslib>=2.40,<3"]
 dev = ["pytest>=8,<10", "ruff>=0.12,<1", "build>=1.2,<2"]
 
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "build>=1.2,<2"]
+
 [project.scripts]
 wind-forecast = "wind_forecast.offline:main"
 

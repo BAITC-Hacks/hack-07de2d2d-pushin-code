@@ -11,22 +11,17 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import requests
 
+from windcast import timeline
 from windcast.paths import weather_cache_dir
-from windcast.timeline import (
-    HORIZON,
-    issue_time_utc,
-    lead_days,
-    live_times,
-    published_before_issue,
-    target_times_utc,
-)
 
 PREVIOUS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 LIVE_URL = "https://api.open-meteo.com/v1/forecast"
 LATITUDES = "43.645150,43.643198"
 LONGITUDES = "78.535604,78.538828"
 MODEL = "best_match"
-# previous_day1..4: contract v0.4 §2 needs day1-3 for "latest" and day2-4 for "previous".
+# previous_day1..4: contract v0.5 §2 needs day1-3 for "latest" and day2-4 for
+# "previous".  We request all four in one response so an offline fallback can
+# serve either version without silently falling back to a future run.
 ISSUE_LAGS = (1, 2, 3, 4)
 TRAINING_LAGS = (1, 2)
 BASE_FIELDS = (
@@ -130,6 +125,8 @@ def _cached_previous(
 
 
 def _rows(payload: dict, targets: pd.DatetimeIndex, lags: list[int]) -> pd.DataFrame:
+    if len(targets) != len(lags):
+        raise ValueError("Число лагов не совпадает с погодным горизонтом")
     records: list[dict] = []
     sites = payload["data"]
     indexes = [
@@ -176,6 +173,8 @@ def _runs(frame: pd.DataFrame, lags: list[int] | None = None) -> list[dict]:
     """One entry per contiguous block of hours served by the same previous_dayN."""
     if lags is None:  # live snapshots: one fetch for the whole window
         lags = [0] * len(frame)
+    if len(frame) != len(lags) or frame.empty:
+        return []
     runs: list[dict] = []
     start = 0
     for i in range(1, len(frame) + 1):
@@ -203,9 +202,12 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
         if run == "previous":
             raise ValueError("Для live нет подтверждённого предыдущего снимка погоды")
         return _fetch_live()
-    issue = issue_time_utc(issue_date)
-    targets = pd.DatetimeIndex(target_times_utc(issue_date))
-    lags = [lead_days(h, previous=run == "previous") for h in range(1, HORIZON + 1)]
+    issue = timeline.issue_time_utc(issue_date)
+    targets = pd.DatetimeIndex(timeline.target_times_utc(issue_date))
+    lags = [
+        timeline.lead_days(h, previous=run == "previous")
+        for h in range(1, timeline.HORIZON + 1)
+    ]
     try:
         payload = _request_previous(str(targets[0].date()), str(targets[-1].date()))
         hourly = _rows(payload, targets, lags)
@@ -220,7 +222,7 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
         source = "cache"
         hourly = _rows(payload, targets, lags)
     if not all(
-        published_before_issue(init.to_pydatetime(), issue_date)
+        timeline.published_before_issue(init.to_pydatetime(), issue_date)
         for init in hourly["init_time_utc"]
     ):
         raise WeatherUnavailable("Прогон погоды опубликован позже момента выпуска")
@@ -248,7 +250,7 @@ def fetch_training_weather(start_utc: str, end_utc: str) -> pd.DataFrame:
 
 
 def _validate_live(data: list[dict], issue_time: datetime) -> None:
-    targets = pd.DatetimeIndex(live_times(issue_time)[1])
+    targets = pd.DatetimeIndex(timeline.live_times(issue_time)[1])
     if len(data) != 2:
         raise ValueError("Некорректный live-ответ Open-Meteo")
     for site in data:
@@ -318,7 +320,7 @@ def _fetch_live() -> dict:
         ) as error:
             raise WeatherUnavailable("Нет валидного live-кэша Open-Meteo") from error
         source = "cache"
-    targets = pd.DatetimeIndex(live_times(issue_time)[1])
+    targets = pd.DatetimeIndex(timeline.live_times(issue_time)[1])
     sites = [
         {
             "hourly": {

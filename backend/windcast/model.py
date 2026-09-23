@@ -11,10 +11,12 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.isotonic import IsotonicRegression
 
+from windcast import timeline
 from windcast.paths import models_dir
-from windcast.timeline import TURBINES, issue_time_utc, live_times, target_times_utc
 
 MODEL_VERSION = "histgb-q-2026-01-31"
+SUPPORTED_LAGS = (1, 2, 3, 4)
+TURBINES = timeline.TURBINES
 FEATURE_COLUMNS = [
     "wind_100m_ms",
     "wind_10m_ms",
@@ -77,20 +79,18 @@ def build_feature_frame(
         elif "init_time_utc" in frame:
             init = _utc(frame["init_time_utc"])
             # init is the upper bound of the run start, floored to 00/06/12/18 UTC
-            # (contract v0.4 §2), so the whole-day lag is the floor of the difference
+            # (contract §2).  Keep the actual current lag: day3/day4 are real
+            # forecast features for the tail of the 48-hour archive window.
             frame["lag_days"] = np.floor((target - init).total_seconds() / 86_400)
         else:
-            frame["lag_days"] = np.where(frame["h"] <= 24, 1, 2)
+            frame["lag_days"] = [timeline.lead_days(int(h)) for h in frame["h"]]
     else:
         frame["lag_days"] = lag_days
     frame["turbine_id"] = {"1": 1, "2": 2, "plant": 3}[turbine]
     if not np.isfinite(frame[FEATURE_COLUMNS].to_numpy(dtype=float)).all():
         raise ValueError("Погодные признаки должны быть конечными")
-    # Trained on previous_day1/2. Older runs (day3/day4 serve the last hours under the
-    # 8 h publication rule of contract v0.4) use the day2 behaviour.
-    frame["lag_days"] = frame["lag_days"].clip(upper=2)
-    if not frame["lag_days"].isin((1, 2)).all():
-        raise ValueError("Погодный лаг должен быть не меньше 1 суток")
+    if not frame["lag_days"].isin(SUPPORTED_LAGS).all():
+        raise ValueError("Погодный лаг должен быть целым числом от 1 до 4 суток")
     return frame[FEATURE_COLUMNS].copy()
 
 
@@ -124,7 +124,7 @@ def training_frame(
     weather = weather.copy()
     weather["target_time_utc"] = _utc(weather["target_time_utc"])
     if "lag_days" not in weather:
-        raise ValueError("Обучающая погода должна содержать lag_days 1 или 2")
+        raise ValueError("Обучающая погода должна содержать lag_days 1–4")
     local = weather["target_time_utc"] + pd.Timedelta(hours=5)
     weather["h"] = local.dt.hour + 1 + 24 * (weather["lag_days"].astype(int) - 1)
     # v1 is deliberately trained with its all-previous-day2 first day as well.
@@ -172,8 +172,17 @@ def _baseline_metadata(train: pd.DataFrame) -> dict[str, Any]:
         }
         output["global"][turbine] = float(frame["power"].median())
         curves: dict[str, IsotonicRegression] = {}
-        for lag in (1, 2):
+        for lag in SUPPORTED_LAGS:
             subset = frame.loc[frame["lag_days"] == lag]
+            if subset.empty:
+                # Training archives intentionally contain day1/day2 observations
+                # (the contract's labelled history).  Reuse the oldest available
+                # curve for day3/day4 rather than inventing a baseline or failing
+                # the January evaluation.
+                fallback = min(lag, 2)
+                subset = frame.loc[frame["lag_days"] == fallback]
+            if subset.empty:
+                subset = frame
             curves[str(lag)] = IsotonicRegression(out_of_bounds="clip").fit(
                 subset["wind_100m_ms"], subset["power"]
             )
@@ -272,17 +281,23 @@ def predict(
         else supplied_issue.tz_convert("UTC")
     )
     inits = _utc(hourly["init_time_utc"])
-    if (inits > supplied_issue).any():
-        raise ValueError("Погодный прогон позже момента выпуска")
+    if issue_date == "live":
+        if (inits > supplied_issue).any():
+            raise ValueError("Погодный снимок получен позже момента выпуска")
+    elif not all(
+        timeline.published_before_issue(init.to_pydatetime(), issue_date)
+        for init in inits
+    ):
+        raise ValueError("Погодный прогон опубликован после момента выпуска")
     expected = (
-        pd.DatetimeIndex(live_times(supplied_issue.to_pydatetime())[1])
+        pd.DatetimeIndex(timeline.live_times(supplied_issue.to_pydatetime())[1])
         if issue_date == "live"
-        else pd.DatetimeIndex(target_times_utc(issue_date))
+        else pd.DatetimeIndex(timeline.target_times_utc(issue_date))
     )
     if not supplied.equals(expected):
         raise ValueError("Целевые часы погоды не совпадают с горизонтом выпуска")
     if issue_date != "live":
-        canonical_issue = pd.Timestamp(issue_time_utc(issue_date))
+        canonical_issue = pd.Timestamp(timeline.issue_time_utc(issue_date))
         if supplied_issue != canonical_issue:
             raise ValueError("Момент выпуска в погоде не совпадает с датой выпуска")
         cutoff = pd.Timestamp(artifact["metadata"]["cutoff_utc"])
@@ -291,7 +306,7 @@ def predict(
             if cutoff.tzinfo is None
             else cutoff.tz_convert("UTC")
         )
-        if cutoff > pd.Timestamp(issue_time_utc(issue_date)):
+        if cutoff > pd.Timestamp(timeline.issue_time_utc(issue_date)):
             raise ValueError("Артефакт обучен на данных после момента выпуска")
     rows: list[pd.DataFrame] = []
     feature_weather = hourly.copy()
