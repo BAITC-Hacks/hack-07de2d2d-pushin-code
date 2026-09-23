@@ -118,3 +118,29 @@ def test_ask_api_rejects_empty_question(root):
 
     assert response.status_code == 400
     assert response.json()["error"]
+
+
+def test_quality_question_without_key_uses_quality_tool(tmp_path, monkeypatch):
+    import json
+
+    from windcast import ask
+
+    monkeypatch.setenv("WINDCAST_ROOT", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (tmp_path / "outputs").mkdir()
+    (tmp_path / "outputs" / "metrics_jan.json").write_text(
+        json.dumps(
+            {
+                "methods": [
+                    {"key": "model", "nmae": 0.1576},
+                    {"key": "power_curve", "nmae": 0.1935},
+                    {"key": "persistence", "nmae": 0.3645},
+                ],
+                "coverage_p10_p90": 0.8052,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = ask.ask("Насколько точна модель?", "2026-02-13")
+    assert result["tools"][0]["name"] == "get_quality"
+    assert "15,8 %" in result["answer"] and "81 %" in result["answer"]

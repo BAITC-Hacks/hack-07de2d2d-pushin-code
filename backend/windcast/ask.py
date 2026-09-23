@@ -29,7 +29,10 @@ SYSTEM_PROMPT = """Ты — помощник диспетчера ВЭС. Отв
 нет, скажи об этом прямо. Перед итоговым ответом вызови нужный инструмент.
 Про пик, минимум, среднее, риски или изменения выпуска сначала вызывай get_issue_summary —
 он покрывает все 48 часов; get_hours отдаёт не больше 12 часов и годится только для деталей
-конкретных часов, по нему нельзя судить о пике или минимуме всего выпуска."""
+конкретных часов, по нему нельзя судить о пике или минимуме всего выпуска.
+Про точность, ошибку, качество модели или надёжность прогноза вызывай get_quality: там ошибка
+(nMAE) модели и простых методов на январской проверке и доля часов, когда факт попал в вероятный
+диапазон. Факта за февраль нет — так и скажи, точность показана на январе."""
 
 
 class AskTimeout(TimeoutError):
@@ -417,6 +420,48 @@ def _deterministic_answer(summary: dict[str, Any], *, no_key: bool) -> str:
     return " ".join(parts)
 
 
+_QUALITY_WORDS = ("точн", "ошиб", "качеств", "надёжн", "надежн", "nmae", "метрик")
+
+
+def _is_quality_question(question: str) -> bool:
+    text = question.lower()
+    return any(word in text for word in _QUALITY_WORDS)
+
+
+def _quality_answer(quality: dict[str, Any]) -> str:
+    if not quality.get("found"):
+        return "Метрики точности не найдены."
+    methods = {m.get("key"): m.get("nmae") for m in quality.get("methods") or []}
+    model = methods.get("model")
+    baselines = {k: v for k, v in methods.items() if k != "model" and v is not None}
+    parts = []
+    if model is not None:
+        parts.append(
+            f"На январской проверке (30 выпусков, факт известен) средняя ошибка модели — "
+            f"{model * 100:.1f} % номинала".replace(".", ",")
+        )
+        if baselines:
+            best_key = min(baselines, key=baselines.get)
+            names = {
+                "power_curve": "кривой мощности",
+                "climatology": "климатологии",
+                "persistence": "персистентности",
+            }
+            best = baselines[best_key]
+            gain = (1 - model / best) * 100
+            parts[-1] += (
+                f", у лучшего простого метода ({names.get(best_key, best_key)}) — "
+                f"{best * 100:.1f} %, модель точнее на {gain:.0f} %".replace(".", ",")
+            )
+    coverage = quality.get("coverage_p10_p90")
+    if coverage is not None:
+        parts.append(
+            f"Факт попал в вероятный диапазон в {coverage * 100:.0f} % часов (цель — 80 %)"
+        )
+    parts.append("Факта за февраль нет, поэтому точность показана на январе")
+    return ". ".join(parts) + "."
+
+
 def _has_openai_key() -> bool:
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     return bool(key) and "..." not in key
@@ -430,6 +475,15 @@ def ask(question: str, issue_date: str | None) -> dict[str, Any]:
         raise ValueError("Вопрос не должен быть длиннее 500 символов")
     selected_issue = _issue_key(issue_date)
     tools_used: list[dict[str, Any]] = []
+    if not _has_openai_key() and _is_quality_question(question):
+        args, quality = _run_tool("get_quality", {})
+        tools_used.append({"name": "get_quality", "args": args})
+        return {
+            "answer": _quality_answer(quality),
+            "mode": "deterministic",
+            "tools": tools_used,
+            "issue_date": selected_issue,
+        }
     if not _has_openai_key():
         args, summary = _run_tool("get_issue_summary", {"issue_date": selected_issue})
         tools_used.append({"name": "get_issue_summary", "args": args})
