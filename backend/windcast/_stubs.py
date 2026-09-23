@@ -9,8 +9,10 @@ Runs (contract v0.4 §2): hour h of "latest" comes from the run started at the t
 minus timeline.lead_days(h) days, floored to 00/06/12/18 UTC; "previous" (v1) is one day older.
 Every such run is published (init + 8 h) by T = D 19:00 UTC. "latest" moves the wind by a
 date-seeded shift, sometimes above the 0.5 m/s recalculation threshold, sometimes not.
-Live (T = now): one run for the whole window — the newest published one ("latest") or the one
-before it ("previous").
+Live (T = now) mirrors windcast.weather: "previous" raises ValueError (no older snapshot), and
+"latest" is the newest Forecast API snapshot stamped with its fetch time. Its values depend on
+the absolute target hour and the newest published 6-hourly run, so snapshots taken within one
+run agree on overlapping hours, and a new run moves them.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ WEATHER_MODEL = "stub_synthetic"
 LIVE = "live"
 RUNS = ("previous", "latest")
 RUN_STEP_H = 6
+LIVE_NO_PREVIOUS = "Для live нет подтверждённого предыдущего снимка погоды"
 
 
 def _seed(*parts: object) -> int:
@@ -59,20 +62,7 @@ def hour_groups() -> list[tuple[int, int]]:
 
 
 def _window(issue_date: str):
-    """T, target hours, per-hour init of both runs and the seeds for this issue."""
-    if issue_date == LIVE:
-        now, targets = timeline.live_times()
-        latest = _floor_run(now - timeline.RUN_AVAILABILITY_DELAY, RUN_STEP_H)
-        previous = latest - timedelta(hours=RUN_STEP_H)
-        n = len(targets)
-        return (
-            now,
-            targets,
-            [previous] * n,
-            [latest] * n,
-            ("live", targets[0].isoformat()),
-            ("live-shift", latest.isoformat()),
-        )
+    """T, target hours, per-hour init of both runs and the seeds for an archive issue."""
     issue = timeline.issue_time_utc(issue_date)
     targets = timeline.target_times_utc(issue_date)
     previous_init, latest_init = [], []
@@ -124,11 +114,62 @@ def _run_entry(hours: str, inits: list[datetime]) -> dict:
     }
 
 
+def _hourly(targets, wind, temp, direction, inits) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "h": np.arange(1, len(targets) + 1),
+            "target_time_utc": pd.to_datetime(targets, utc=True),
+            "wind_100m_ms": np.round(wind, 2),
+            "wind_10m_ms": np.round(wind * 0.75, 2),
+            "wind_dir_deg": np.round(direction, 1),
+            "temp_c": np.round(temp, 2),
+            "init_time_utc": pd.to_datetime(inits, utc=True),
+        }
+    )
+
+
+def _fetch_live() -> dict:
+    fetched_at, targets = timeline.live_times()
+    newest_run = _floor_run(fetched_at - timeline.RUN_AVAILABILITY_DELAY, RUN_STEP_H)
+    stamps = np.array([int(t.timestamp()) // 3600 for t in targets])
+    local_hour = np.array([t.astimezone(timeline.LOCAL_TZ).hour for t in targets])
+    noise = np.array(
+        [np.random.default_rng(_seed("live", s)).normal(0.0, 0.7) for s in stamps]
+    )
+    rng = np.random.default_rng(_seed("live-run", newest_run.isoformat()))
+    shift = rng.choice([-1.0, 1.0]) * rng.uniform(0.05, 1.05)
+    wind = (
+        7.0
+        + 3.5 * np.sin(2 * np.pi * stamps / 31)
+        + np.sin(2 * np.pi * (local_hour - 14) / 24)
+        + noise
+        + shift
+    )
+    temp = (
+        -6.0
+        + 5.0 * np.sin(2 * np.pi * (local_hour - 9) / 24)
+        + 2.0 * np.sin(2 * np.pi * stamps / 120)
+        + 0.5 * noise
+    )
+    direction = (200.0 + 40.0 * np.sin(2 * np.pi * stamps / 50)) % 360
+    inits = [fetched_at] * len(targets)
+    return {
+        "issue_date": LIVE,
+        "issue_time_utc": fetched_at,
+        "hourly": _hourly(targets, np.clip(wind, 0.3, 24.0), temp, direction, inits),
+        "runs": [_run_entry(f"{lo}-{hi}", inits) for lo, hi in hour_groups()],
+        "source": "stub",
+    }
+
+
 def fetch_weather(issue_date: str, run: str = "latest") -> dict:
     if run not in RUNS:
         raise ValueError(f'run должен быть "previous" или "latest", а не «{run}»')
-    if issue_date != LIVE:
-        issue_date = timeline.parse_issue_date(issue_date).isoformat()
+    if issue_date == LIVE:
+        if run == "previous":
+            raise ValueError(LIVE_NO_PREVIOUS)
+        return _fetch_live()
+    issue_date = timeline.parse_issue_date(issue_date).isoformat()
     issue, targets, previous_init, latest_init, base_key, shift_key = _window(
         issue_date
     )
@@ -142,17 +183,7 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
         wind = np.where(changed, np.clip(wind + shift + jitter, 0.3, 24.0), wind)
         temp = np.where(changed, temp + 0.3 * shift, temp)
         inits = latest_init
-    hourly = pd.DataFrame(
-        {
-            "h": np.arange(1, len(targets) + 1),
-            "target_time_utc": pd.to_datetime(targets, utc=True),
-            "wind_100m_ms": np.round(wind, 2),
-            "wind_10m_ms": np.round(wind * 0.75, 2),
-            "wind_dir_deg": np.round(direction, 1),
-            "temp_c": np.round(temp, 2),
-            "init_time_utc": pd.to_datetime(inits, utc=True),
-        }
-    )
+    hourly = _hourly(targets, wind, temp, direction, inits)
     return {
         "issue_date": issue_date,
         "issue_time_utc": issue,
@@ -171,12 +202,17 @@ def check_data(issue_date: str, weather: dict) -> dict:
     missing = int(hourly[["wind_100m_ms", "temp_c"]].isna().any(axis=1).sum())
     missing += max(0, timeline.HORIZON - len(hourly))
     inits = pd.to_datetime(hourly["init_time_utc"], utc=True)
-    published = inits + timeline.RUN_AVAILABILITY_DELAY
+    if issue_date == LIVE:  # a Live snapshot is stamped with its fetch time
+        published = inits
+        freshness = "снимок Forecast API получен к моменту выпуска"
+    else:
+        published = inits + timeline.RUN_AVAILABILITY_DELAY
+        lag_h = (issue - published.max()).total_seconds() / 3600
+        freshness = f"последний прогон опубликован за {lag_h:.0f} ч до момента выпуска"
     before = bool((published <= issue).all())
-    lag_h = (issue - published.max()).total_seconds() / 3600
     notes = [
         f"{timeline.HORIZON - missing} из {timeline.HORIZON} ч без пропусков",
-        f"последний прогон опубликован за {lag_h:.0f} ч до момента выпуска",
+        freshness,
         "погода синтетическая (заглушка)",
     ]
     if not before:

@@ -586,7 +586,10 @@ def ungrounded_numbers(text: str, sources: list[str]) -> list[str]:
 
 # ---------- decision policy (the agent's; tools only report facts) ----------
 def policy_recalc(facts: dict | None) -> bool:
-    """Recalculate when the fresher run is legal and moves the wind or brings a new risk."""
+    """Recalculate when the fresher run is legal and moves the wind or brings a new risk.
+
+    Live also recalculates when the current version no longer overlaps the new window.
+    """
     if not facts:
         return False
     return (
@@ -595,6 +598,7 @@ def policy_recalc(facts: dict | None) -> bool:
         and (
             float(facts.get("mean_abs_wind_shift_h1_24_ms") or 0.0) > RECALC_SHIFT_MS
             or bool(facts.get("new_flags_vs_current"))
+            or facts.get("overlap_hours") == 0
         )
     )
 
@@ -616,6 +620,8 @@ def decision_title(facts: dict | None, recalc: bool, number: int, live: bool) ->
             return f"Новый прогон ещё не вышел — v{number} остаётся"
         return f"Более свежего прогона до момента выпуска нет — v{number} остаётся"
     over = shift > RECALC_SHIFT_MS
+    if recalc and facts.get("overlap_hours") == 0:
+        return "Текущая версия не покрывает новое окно — пересчитываю"
     if recalc:
         if over:
             return f"Сдвиг {fmt_shift(shift)} м/с больше порога — пересчитываю"
@@ -655,6 +661,21 @@ def late_run_text(init, limit) -> str:
     )
 
 
+def _source_unavailable(run: str, exc: Exception) -> Outcome:
+    text = f"{type(exc).__name__}: {exc}"
+    return Outcome(
+        {
+            "ok": False,
+            "run": run,
+            "source_unavailable": True,
+            "error": f"источник погоды недоступен — {text}",
+        },
+        "Источник погоды недоступен",
+        f"Запрос погоды (run={run}) не удался: {text}.",
+        "error",
+    )
+
+
 # ---------- run context and trace ----------
 @dataclass
 class RunContext:
@@ -677,6 +698,10 @@ class RunContext:
     grounding: list[str] = field(default_factory=list)
     new_run_announced: bool = False
     fetch_attempts: int = 0
+    base_run: str = (
+        "previous"  # the run v1 is built on; Live without an older snapshot: latest
+    )
+    no_older_noted: bool = False
 
     @property
     def live(self) -> bool:
@@ -693,11 +718,16 @@ class RunContext:
         return to_utc(self.issue_time_utc)
 
     def published(self, init) -> bool:
-        """Contract v0.4 §2: a run counts only once published, init + 8 h <= T."""
-        init = to_utc(init).to_pydatetime()
+        """Contract v0.4 §2: a run counts only once published, init + 8 h <= T.
+
+        Live: the Forecast API serves only published runs, and the weather port stamps a
+        Live snapshot with its fetch time, so the check is snapshot time <= now.
+        """
         if self.live:
-            return timeline.run_available_at(init) <= self.limit_time().to_pydatetime()
-        return timeline.published_before_issue(init, self.issue_date)
+            return to_utc(init) <= self.limit_time()
+        return timeline.published_before_issue(
+            to_utc(init).to_pydatetime(), self.issue_date
+        )
 
     def unpublished(self, inits) -> list:
         return [init for init in inits if not self.published(init)]
@@ -713,6 +743,10 @@ class RunContext:
         return None
 
     def fetch(self, run: str) -> dict:
+        if (
+            self.live and run == "previous"
+        ):  # not an outage: Live may have no older snapshot
+            return ports.fetch_weather(self.issue_date, run=run)
         self.fetch_attempts += 1
         if self.scenario == "weather_outage" and self.fetch_attempts == 1:
             raise ConnectionError(
@@ -830,7 +864,7 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 _RUN_PROP = {
     "type": "string",
     "enum": list(RUNS),
-    "description": "previous — прогон для v1 (previous_day2 на всё окно); latest — самый свежий прогон до T",
+    "description": "previous — прогон на сутки старше, для v1; latest — самый свежий прогон, опубликованный до момента выпуска T",
 }
 
 TOOL_SCHEMAS = [
@@ -1001,12 +1035,19 @@ class ToolRegistry:
         return outcome.result
 
     def decide(
-        self, recalc: bool, *, by: str, reason: str = "", status: str | None = None
+        self,
+        recalc: bool,
+        *,
+        by: str,
+        reason: str = "",
+        status: str | None = None,
+        title: str | None = None,
+        keep_reason: str | None = None,
     ) -> dict:
         """Record and trace the agent's recalculation decision (LLM's or the rule's)."""
         ctx = self.ctx
         number = ctx.current.number if ctx.current else ctx.latest_version
-        title = decision_title(ctx.facts, recalc, number, ctx.live)
+        title = title or decision_title(ctx.facts, recalc, number, ctx.live)
         facts = ctx.facts or {}
         lines = []
         detail = ""
@@ -1030,7 +1071,7 @@ class ToolRegistry:
                 f"ветра за часы 1–24 — {fmt1(facts.get('mean_abs_wind_shift_h1_24_ms') or 0)}"
                 f" м/с; новых рисков — {len(fresh)}."
             )
-        if by == "rule":
+        if by == "rule" and facts:
             lines.append(
                 "Политика: пересчёт, если прогон свежее текущего, опубликован до T и средний сдвиг "
                 "ветра за часы 1–24 больше 0,5 м/с или появился новый риск."
@@ -1041,6 +1082,7 @@ class ToolRegistry:
             "reason": reason or title,
             "title": title,
             "detail": detail,
+            "keep_reason": keep_reason,
         }
         self.tracer.event(
             "thought",
@@ -1062,7 +1104,50 @@ class ToolRegistry:
             raise ToolError(
                 'run: "previous" (прогон для v1) или "latest" (самый свежий до T)'
             )
-        weather = normalize_weather(ctx.fetch(run))
+        try:
+            raw = ctx.fetch(run)
+        except Exception as exc:  # noqa: BLE001 — any weather-port failure: source unavailable
+            if (
+                run == "previous"
+                and ctx.live
+                and ctx.trigger == "issue"
+                and not ctx.versions
+            ):
+                return self._live_latest_as_base(exc)
+            return _source_unavailable(run, exc)
+        return self._weather_outcome(run, normalize_weather(raw))
+
+    def _live_latest_as_base(self, exc: Exception) -> Outcome:
+        """Live has no older snapshot: v1 is built on the latest run instead."""
+        ctx = self.ctx
+        if not ctx.no_older_noted:
+            ctx.no_older_noted = True
+            self.tracer.event(
+                "thought",
+                "Для Live нет более старого снимка — выпускаю v1 на последнем прогоне",
+                f"Источник погоды: {type(exc).__name__}: {exc}. v1 строю на последнем "
+                "прогоне; более свежий проверю при следующем обновлении погоды.",
+                stage="weather",
+                status="ok",
+                version=ctx.event_version(),
+            )
+        try:
+            raw = ctx.fetch("latest")
+        except Exception as error:  # noqa: BLE001 — any weather-port failure
+            return _source_unavailable("latest", error)
+        ctx.base_run = "latest"
+        outcome = self._weather_outcome("latest", normalize_weather(raw))
+        outcome.result["requested_run"] = "previous"
+        outcome.result["note"] = (
+            "для Live нет более старого снимка — v1 на последнем прогоне"
+        )
+        outcome.body = (
+            "Более старого снимка нет — взят последний прогон. " + outcome.body
+        )
+        return outcome
+
+    def _weather_outcome(self, run: str, weather: dict) -> Outcome:
+        ctx = self.ctx
         ctx.weathers[run] = weather
         ctx.last_run = run
         limit = ctx.limit_time()
@@ -1129,7 +1214,13 @@ class ToolRegistry:
         merged = weather["hourly"][cols].merge(
             base.weather["hourly"][cols], on="target_time_utc", suffixes=("", "_cur")
         )
-        fresher = bool((merged["init_time_utc"] > merged["init_time_utc_cur"]).any())
+        if len(merged):
+            fresher = bool(
+                (merged["init_time_utc"] > merged["init_time_utc_cur"]).any()
+            )
+        else:  # Live: the current version no longer overlaps the new window
+            newest = base.weather["hourly"]["init_time_utc"].max()
+            fresher = bool(weather["hourly"]["init_time_utc"].max() > newest)
         head = merged[merged["h"] <= SHIFT_HORIZON_H]
         delta = head["wind_100m_ms"].astype(float) - head["wind_100m_ms_cur"].astype(
             float
@@ -1144,6 +1235,7 @@ class ToolRegistry:
             else 0.0,
             "mean_wind_shift_h1_24_ms": _r(delta.mean()) if len(delta) else 0.0,
             "new_flags_vs_current": fresh,
+            "overlap_hours": len(merged),
             "current_runs": weather_runs(base.weather, ctx.published),
         }
         ctx.facts = facts
@@ -1202,26 +1294,27 @@ class ToolRegistry:
                 f"v{ctx.latest_version} уже опубликована; новый прогон — через "
                 'fetch_weather(run="latest") и recalc_forecast'
             )
-        weather = ctx.weathers.get("previous")
+        base = ctx.base_run
+        weather = ctx.weathers.get(base)
         if weather is None:
             raise ToolError(
                 'Сначала fetch_weather(run="previous") — v1 строится на нём'
             )
-        check = ctx.checks.get("previous")
+        check = ctx.checks.get(base)
         if check is None:
             raise ToolError(
-                'Сначала check_data(run="previous") — полнота и «без будущего»'
+                f'Сначала check_data(run="{base}") — полнота и «без будущего»'
             )
         if not check["ok"]:
             raise ToolError("Погода не прошла check_data — модель на ней не запускаю")
         frame, touched = sanitize_forecast(ports.predict(ctx.issue_date, weather))
-        ctx.current = Version(number=1, frame=frame, weather=weather, run="previous")
+        ctx.current = Version(number=1, frame=frame, weather=weather, run=base)
         stats = plant_stats(frame)
         model_version = ports.model_version()
         result = {
             "ok": True,
             "version": 1,
-            "run": "previous",
+            "run": base,
             "rows": len(frame),
             "model_version": model_version,
             "plant": stats,
@@ -1229,7 +1322,8 @@ class ToolRegistry:
                 t: pct(frame.loc[frame["turbine"] == t, "p50"].mean()) for t in TURBINES
             },
         }
-        body = f"Модель {model_version}, прогон previous. {_stats_text(stats)}"
+        run_ru = "последний прогон" if base == "latest" else "предыдущий прогон"
+        body = f"Модель {model_version}, {run_ru}. {_stats_text(stats)}"
         if touched:
             body += (
                 f" Поправлено строк (обрезка в [0, 1], порядок квантилей): {touched}."
@@ -1272,9 +1366,36 @@ class ToolRegistry:
             raise ToolError(
                 "Сначала опубликуйте текущую версию (publish_forecast), потом пересчитывайте"
             )
+        decided = ctx.decision or {}
+        if (
+            origin == "llm"
+            and decided.get("by") == "rule"
+            and not decided.get("recalc")
+        ):
+            raise ToolError(
+                f"Решение по новому прогону уже принято: {decided['title']}"
+            )
         weather = ctx.weathers.get("latest")
         if weather is None:
-            weather = normalize_weather(ctx.fetch("latest"))
+            try:
+                raw = ctx.fetch("latest")
+            except Exception as exc:  # noqa: BLE001 — any weather-port failure
+                text = f"источник погоды недоступен — {type(exc).__name__}: {exc}"
+                result = {
+                    "ok": False,
+                    "status": "error",
+                    "error": text,
+                    "version": base.number,
+                }
+                ctx.recalcs.append(result)
+                return Outcome(
+                    result,
+                    "Новый прогон недоступен — пересчёт не выполнен",
+                    f"{text[0].upper()}{text[1:]}. v{base.number} остаётся.",
+                    "warn",
+                    version=base.number,
+                )
+            weather = normalize_weather(raw)
             ctx.weathers["latest"] = weather
         limit = ctx.limit_time()
         late = ctx.unpublished(weather["hourly"]["init_time_utc"])
