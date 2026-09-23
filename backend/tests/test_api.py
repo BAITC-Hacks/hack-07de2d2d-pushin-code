@@ -348,6 +348,23 @@ def test_forecast_filters(client):
     assert body["rows"][0]["p50"] == pytest.approx(0.21)
 
 
+def test_api_recomputes_archived_publication_bound() -> None:
+    version = {
+        "weather_runs": [
+            {
+                "hours": "1-17",
+                "model": "ecmwf_ifs025",
+                "init_utc": "2026-02-13T18:00Z",
+                "before_issue": True,
+            }
+        ]
+    }
+
+    result = api._weather_runs(version, ISSUE, "2026-02-13T19:00Z")
+
+    assert result[0]["before_issue"] is False
+
+
 def test_forecast_errors(client):
     assert "3" in _error(client.get(f"/api/forecasts/{ISSUE}?version=3"), 404)
     _error(client.get(f"/api/forecasts/{ISSUE}?version=abc"), 400)

@@ -204,14 +204,16 @@ def _baseline_values(
     )
     values["persistence"] = values["persistence"].fillna(values["climatology"])
     curves = baseline["power_curve"][turbine]
-    values["power_curve"] = np.concatenate(
-        [
-            curves[str(lag)].predict(
-                features.loc[features["lag_days"] == lag, "wind_100m_ms"]
-            )
-            for lag in (1, 2)
-        ]
-    )
+    values["power_curve"] = np.nan
+    for lag in sorted(features["lag_days"].astype(int).unique()):
+        # Day3/day4 are valid archive forecast lags.  Artifacts trained from
+        # labelled history may only have day1/day2 curves, so use day2 as the
+        # explicit, deterministic baseline fallback for those buckets.
+        key = str(lag) if str(lag) in curves else str(min(lag, 2))
+        mask = features["lag_days"].astype(int) == lag
+        values.loc[mask, "power_curve"] = curves[key].predict(
+            features.loc[mask, "wind_100m_ms"]
+        )
     values[["climatology", "persistence", "power_curve"]] = values[
         ["climatology", "persistence", "power_curve"]
     ].clip(0, 1)

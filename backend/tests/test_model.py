@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from windcast import timeline
 from windcast.evaluate import _baseline_values
 from windcast.model import (
     MODEL_VERSION,
@@ -29,7 +30,10 @@ def _weather() -> dict:
                 "wind_dir_deg": np.linspace(0, 350, 48),
                 "temp_c": np.linspace(-8, 4, 48),
                 "init_time_utc": [
-                    target - pd.Timedelta(days=1 if h <= 24 else 2)
+                    (
+                        target
+                        - pd.Timedelta(days=timeline.lead_days(h))
+                    ).floor("6h")
                     for h, target in enumerate(targets, start=1)
                 ],
             }
@@ -65,6 +69,14 @@ def test_weather_only_features_ignore_scada_inference_values() -> None:
     changed = weather["hourly"].assign(power=0.99, scada_wind_ms=99.0)
     second = build_feature_frame(changed, turbine="1")
     pd.testing.assert_frame_equal(first, second)
+
+
+def test_archive_features_preserve_current_day3_lag() -> None:
+    features = build_feature_frame(_weather()["hourly"], turbine="1")
+
+    assert list(features.loc[:16, "lag_days"]) == [1] * 17
+    assert set(features.loc[17:40, "lag_days"]) == {2}
+    assert list(features.loc[41:, "lag_days"]) == [3] * 7
 
 
 def test_predict_returns_exact_monotone_bounded_144_rows(tmp_path) -> None:

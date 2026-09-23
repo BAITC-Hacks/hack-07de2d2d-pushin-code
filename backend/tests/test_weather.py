@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import pytest
@@ -66,6 +67,19 @@ def test_previous_lags_bounds_and_cache_fallback(
     cached = weather.fetch_weather("2026-02-13")
     assert cached["source"] == "cache"
     pd.testing.assert_frame_equal(latest["hourly"], cached["hourly"])
+
+
+def test_previous_runs_url_requests_all_issue_lags() -> None:
+    query = parse_qs(
+        urlparse(weather.previous_runs_url("2026-02-13", "2026-02-15")).query
+    )
+    requested = query["hourly"][0].split(",")
+    assert len(requested) == len(weather.BASE_FIELDS) * 4
+    assert {
+        name.rsplit("_previous_day", 1)[1]
+        for name in requested
+        if "_previous_day" in name
+    } == {"1", "2", "3", "4"}
 
 
 def test_previous_keeps_three_run_groups_and_rejects_bad_input(

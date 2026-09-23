@@ -370,8 +370,8 @@ def _hours_span(value: Any) -> tuple[int, int]:
     return 1, timeline.HORIZON
 
 
-def _weather_runs(version: dict, issue_time_utc: Any) -> list[dict]:
-    """weather_runs with `before_issue` filled in when the writer left it out."""
+def _weather_runs(version: dict, issue: str, issue_time_utc: Any) -> list[dict]:
+    """Return run provenance with the contract's publication check recomputed."""
     moment = _parse_dt(issue_time_utc)
     out = []
     for item in version.get("weather_runs") or []:
@@ -379,8 +379,16 @@ def _weather_runs(version: dict, issue_time_utc: Any) -> list[dict]:
             continue
         item = dict(item)
         init = _parse_dt(item.get("init_utc"))
-        if "before_issue" not in item and moment and init:
-            item["before_issue"] = init + timeline.RUN_AVAILABILITY_DELAY <= moment
+        if moment and init:
+            if issue == LIVE:
+                # Live snapshots are stamped with the fetch/issue moment.
+                item["before_issue"] = init <= moment
+            else:
+                # Archived runs are usable only once published, not merely once
+                # their initialization timestamp is before T.
+                item["before_issue"] = timeline.published_before_issue(
+                    init, issue
+                )
         out.append(item)
     return out
 
@@ -429,7 +437,7 @@ def _forecast_view(
         "recorded_at": record.get("recorded_at"),
         "created_at": version.get("created_at"),
         "source": version.get("source"),
-        "weather_runs": _weather_runs(version, utc),
+        "weather_runs": _weather_runs(version, issue, utc),
         "change_note": version.get("change_note"),
         "summary": version.get("summary"),
         "flags": version.get("flags") or [],
