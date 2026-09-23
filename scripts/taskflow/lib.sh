@@ -289,6 +289,19 @@ tf_branch_state_file() {
   printf '%s/%s.state\n' "$state_dir" "$digest"
 }
 
+tf_recorded_base() {
+  local path=$1 branch=$2 state_file base
+  state_file=$(tf_branch_state_file "$path" "$branch") || return 1
+  if [ -f "$state_file" ]; then
+    base=$(sed -n 's/^base=//p' "$state_file" | head -1)
+    if [ -n "$base" ]; then
+      tf_normalize_base "$base"
+      return 0
+    fi
+  fi
+  tf_default_base "$path"
+}
+
 tf_sha256() {
   if tf_command_exists shasum; then
     shasum -a 256 | awk '{print $1}'
@@ -301,8 +314,8 @@ tf_sha256() {
 }
 
 tf_start() {
-  local task='' requested_name='' base='' path='' base_ref branch slug explicit_name=false
-  local existing state_file state_task candidate index=1 parent path_abs
+  local task='' requested_name='' base='' path='' base_ref branch slug explicit_name=false ff_base=false
+  local existing state_file state_task candidate index=1 parent path_abs current_head
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -315,6 +328,8 @@ tf_start() {
       --path)
         [ $# -ge 2 ] || { tf_error 'start --path requires a value.'; return 1; }
         path=$2; shift 2 ;;
+      --ff-base)
+        ff_base=true; shift ;;
       -*) tf_error "start: unknown option $1"; return 1 ;;
       *)
         [ -z "$task" ] || { tf_error 'start accepts one plain task description.'; return 1; }
@@ -367,6 +382,23 @@ tf_start() {
         tf_error "Branch '$branch' is already attached to $existing, not $path."
         return 1
       }
+    fi
+    if [ "$ff_base" = true ] && [ "$(git -C "$existing" rev-parse HEAD)" != "$(git -C "$TF_PROJECT_ROOT" rev-parse "$base_ref")" ]; then
+      [ -z "$(git -C "$existing" status --porcelain)" ] || {
+        tf_error "Cannot fast-forward dirty worktree '$existing'."
+        return 1
+      }
+      current_head=$(git -C "$existing" rev-parse HEAD) || return 1
+      git -C "$existing" merge-base --is-ancestor "$current_head" "$base_ref" || {
+        tf_error "Cannot fast-forward '$branch': it has task commits outside selected base '$base'."
+        return 1
+      }
+      git -C "$existing" reset --keep "$base_ref" || {
+        tf_error "Could not fast-forward '$branch' to '$base'."
+        return 1
+      }
+      tf_result "status=fast_forwarded task=$task branch=$branch path=$existing base=$base"
+      return 0
     fi
     tf_result "status=existing task=$task branch=$branch path=$existing base=$base"
     return 0
@@ -463,14 +495,14 @@ tf_find_python_roots() {
     printf '%s\n' "$(dirname "$candidate")"
     found=1
   done < <(find "$root" \
-    \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+    \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
        -o -path "$root/.taskflow-worktrees" -o -path '*/__pycache__' -o -path '*/.tox' \) -prune -o \
     -type f \( -name pyproject.toml -o -name setup.py -o -name setup.cfg -o -name requirements.txt \
        -o -name 'requirements-*.txt' -o -name uv.lock -o -name poetry.lock -o -name Pipfile \) -print)
 
   if [ "$found" -eq 0 ]; then
     candidate=$(find "$root" \
-      \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+      \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
          -o -path "$root/.taskflow-worktrees" -o -path '*/__pycache__' \) -prune -o \
       -type f -name '*.py' -print -quit)
     [ -n "$candidate" ] && printf '%s\n' "$root"
@@ -480,7 +512,7 @@ tf_find_python_roots() {
 tf_find_js_roots() {
   local root=$1 candidate
   find "$root" \
-    \( -path "$root/.git" -o -path "$root/node_modules" -o -path "$root/.venv" -o -path "$root/venv" \
+    \( -path "$root/.git" -o -path '*/node_modules' -o -path '*/.venv' -o -path '*/venv' \
        -o -path "$root/.taskflow-worktrees" -o -path '*/dist' -o -path '*/build' -o -path '*/.next' \) -prune -o \
     -type f -name package.json -print | while IFS= read -r candidate; do
       [ -n "$candidate" ] && dirname "$candidate"
@@ -491,7 +523,7 @@ tf_has_python_tests() {
   local root=$1 test_file
   [ -d "$root/tests" ] && return 0
   test_file=$(find "$root" \
-    \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+    \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
        -o -path '*/__pycache__' \) -prune -o -type f \
     \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)
   [ -n "$test_file" ]
@@ -692,7 +724,12 @@ tf_verify() {
   }
   branch=$(tf_current_branch "$root") || true
   [ -n "$branch" ] || branch=DETACHED
-  base=$(tf_default_base "$root") || return 1
+  if [ "$branch" = DETACHED ]; then
+    base=$(tf_default_base "$root") || return 1
+  else
+    base=$(tf_recorded_base "$root" "$branch") || return 1
+  fi
+  tf_base_ref "$root" "$base" >/dev/null || return 1
   receipt_dir=$(tf_receipt_dir "$root") || return 1
   mkdir -p "$receipt_dir"
   receipt="$receipt_dir/$commit.receipt"

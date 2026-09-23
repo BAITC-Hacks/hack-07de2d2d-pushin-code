@@ -12,7 +12,7 @@ tf_usage() {
   cat <<'EOF'
 Usage:
   tf.sh doctor
-  tf.sh start <plain task> [--name slug] [--base branch] [--path path]
+  tf.sh start <plain task> [--name slug] [--base branch] [--path path] [--ff-base]
   tf.sh list
   tf.sh commit --message text
   tf.sh verify [path]

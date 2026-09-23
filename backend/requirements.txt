@@ -7,3 +7,10 @@ requests==2.32.3
 fastapi==0.115.12
 uvicorn==0.34.0
 openai==1.109.1
+scipy==1.15.2
+joblib==1.4.2
+httpx==0.28.1
+pytest==8.3.5
+ruff==0.16.8
+build==1.2.2.post1
+setuptools==75.8.0

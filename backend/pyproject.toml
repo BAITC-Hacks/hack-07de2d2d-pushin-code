@@ -1,4 +1,17 @@
-# Test and lint settings only. Run code with PYTHONPATH=backend (see docs/CONTRACT.md §8).
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windcast"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+# Run code with PYTHONPATH=backend (see docs/CONTRACT.md §8).
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Shared timeline.py keeps timezone.utc spelling for Python 3.12 readability.
+ignore = ["UP017"]
