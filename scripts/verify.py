@@ -220,10 +220,14 @@ class Check:
 def new_checks() -> list[Check]:
     return [
         Check("issues", "Выпуски на месте: forecasts/{D}.csv", "выпусков"),
-        Check("no_future", "Без будущего: прогон опубликован до T (CSV)", "строк"),
+        Check(
+            "no_future",
+            "Без будущего: прогон доступен к T (старт + 8 ч ≤ T, CSV)",
+            "строк",
+        ),
         Check(
             "no_future_runs",
-            "Без будущего: прогон опубликован до T ({D}.json)",
+            "Без будущего: прогоны доступны к T (старт + 8 ч ≤ T, {D}.json)",
             "прогонов",
         ),
         Check("header", "Заголовок CSV: столбцы §7 по порядку", "файлов"),
@@ -457,7 +461,7 @@ class Verifier:
             future = [
                 (
                     f"weather_init_max_utc={show(raw)} — не время с зоной "
-                    "(нужно вида 2026-02-13T00:00Z), будущее не исключить"
+                    "(нужно вида 2026-02-13T00:00Z), публикацию к T подтвердить нельзя"
                 )
             ]
         else:
@@ -578,7 +582,10 @@ class Verifier:
                 init = parse_moment(raw)
                 where = f"v{key} weather_runs[{index}] (часы {run.get('hours', '?')})"
                 if init is None:
-                    message = f"{where}: init_utc={show(raw)} — не время с зоной"
+                    message = (
+                        f"{where}: init_utc={show(raw)} — не время с зоной, "
+                        "публикацию к T подтвердить нельзя"
+                    )
                     check.add([Problem(label, None, message)])
                 else:
                     late = published_late(init, moment)
@@ -755,7 +762,7 @@ def render(checks: list[Check], root: Path, first: date, last: date) -> str:
         f"Корень: {root}",
         "T — момент выпуска D: D 19:00 UTC = (D+1) 00:00 по UTC+5",
         (
-            "Прогон погоды годен, если опубликован до T: старт + 8 ч ≤ T, "
+            "Прогон погоды доступен к выпуску, если старт + 8 ч ≤ T, "
             "т. е. старт не позже D 11:00 UTC (§2)"
         ),
     ]

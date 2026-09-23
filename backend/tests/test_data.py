@@ -16,7 +16,7 @@ from windcast.data import (
     hourly_quality_summary,
     load_hourly_dataset,
 )
-from windcast.timeline import target_times_utc
+from windcast.timeline import live_times, target_times_utc
 
 RAW_HEADER = (
     "ID,Статистическое время,Средняя скорость ветра(m/s),"
@@ -148,6 +148,71 @@ def test_check_data_requires_exact_weather_contract() -> None:
     result = check_data("2026-02-13", weather)
     assert not result["ok"]
     assert result["missing_hours"] == 1
+
+
+@pytest.mark.parametrize(
+    ("init_time", "expected_ok"),
+    [
+        ("2026-02-13T06:00:00Z", True),
+        ("2026-02-13T11:00:00Z", True),
+        ("2026-02-13T12:00:00Z", False),
+        ("2026-02-13T18:00:00Z", False),
+    ],
+)
+def test_check_data_enforces_run_publication_delay_for_archive_issues(
+    init_time: str, expected_ok: bool
+) -> None:
+    issue_date = "2026-02-13"
+    weather = {
+        "hourly": pd.DataFrame(
+            {
+                "h": range(1, 49),
+                "target_time_utc": target_times_utc(issue_date),
+                "wind_100m_ms": [7.0] * 48,
+                "temp_c": [-2.0] * 48,
+                "init_time_utc": [init_time] * 48,
+            }
+        )
+    }
+
+    result = check_data(issue_date, weather)
+
+    assert result["ok"] is expected_ok
+    assert result["runs_before_issue"] is expected_ok
+    if not expected_ok:
+        assert "опубликованный позже момента выпуска" in result["notes"][0]
+
+
+@pytest.mark.parametrize(
+    ("init_time", "expected_ok"),
+    [
+        ("2026-02-13T06:00:00Z", True),
+        ("2026-02-13T07:00:00Z", True),
+        ("2026-02-13T08:00:00Z", False),
+        ("2026-02-13T12:00:00Z", False),
+    ],
+)
+def test_check_data_uses_live_issue_moment_for_publication_delay(
+    init_time: str, expected_ok: bool
+) -> None:
+    issue_time = pd.Timestamp("2026-02-13T15:00:00Z")
+    weather = {
+        "issue_time_utc": issue_time,
+        "hourly": pd.DataFrame(
+            {
+                "h": range(1, 49),
+                "target_time_utc": live_times(issue_time.to_pydatetime())[1],
+                "wind_100m_ms": [7.0] * 48,
+                "temp_c": [-2.0] * 48,
+                "init_time_utc": [init_time] * 48,
+            }
+        ),
+    }
+
+    result = check_data("live", weather)
+
+    assert result["ok"] is expected_ok
+    assert result["runs_before_issue"] is expected_ok
 
 
 def test_real_raw_csv_build_reports_quality() -> None:
