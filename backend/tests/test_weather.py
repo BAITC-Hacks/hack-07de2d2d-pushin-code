@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from windcast import weather
-from windcast.timeline import issue_time_utc
+from windcast.timeline import issue_time_utc, published_before_issue
 
 
 def _payload(start: str = "2026-02-13T19:00") -> dict:
@@ -25,7 +25,7 @@ def _payload(start: str = "2026-02-13T19:00") -> dict:
         ("wind_direction_100m", 180.0),
         ("temperature_2m", -2.0),
     ):
-        for lag in (1, 2):
+        for lag in weather.ISSUE_LAGS:
             hourly[f"{name}_previous_day{lag}"] = [base + lag] * 48
     site = {
         "latitude": 43.62,
@@ -54,28 +54,34 @@ def test_previous_lags_bounds_and_cache_fallback(
     )
     latest = weather.fetch_weather("2026-02-13")
     assert latest["source"] == "api" and len(latest["hourly"]) == 48
-    assert latest["hourly"].loc[23, "init_time_utc"] == issue_time_utc(
-        "2026-02-13"
-    ) - pd.Timedelta(hours=1)
-    assert latest["hourly"].loc[24, "init_time_utc"] == issue_time_utc(
-        "2026-02-13"
-    ) - pd.Timedelta(hours=24)
-    assert (latest["hourly"]["init_time_utc"] <= latest["issue_time_utc"]).all()
+    issue = issue_time_utc("2026-02-13")
+    # contract v0.4 §2: h 17 still uses previous_day1 (run D 06:00Z), h 18 already day2
+    assert latest["hourly"].loc[16, "init_time_utc"] == issue - pd.Timedelta(hours=13)
+    assert latest["hourly"].loc[17, "init_time_utc"] == issue - pd.Timedelta(hours=31)
+    assert all(
+        published_before_issue(init.to_pydatetime(), "2026-02-13")
+        for init in latest["hourly"]["init_time_utc"]
+    )
     monkeypatch.setattr(weather.requests, "get", _offline)
     cached = weather.fetch_weather("2026-02-13")
     assert cached["source"] == "cache"
     pd.testing.assert_frame_equal(latest["hourly"], cached["hourly"])
 
 
-def test_previous_keeps_two_run_groups_and_rejects_bad_input(
+def test_previous_keeps_three_run_groups_and_rejects_bad_input(
     weather_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         weather.requests, "get", lambda *args, **kwargs: _Response(_payload())
     )
     previous = weather.fetch_weather("2026-02-13", run="previous")
-    assert [run["hours"] for run in previous["runs"]] == ["1-24", "25-48"]
-    assert previous["runs"][0]["init_utc"] < previous["runs"][1]["init_utc"]
+    assert [run["hours"] for run in previous["runs"]] == ["1-17", "18-41", "42-48"]
+    latest = weather.fetch_weather("2026-02-13", run="latest")
+    assert [run["hours"] for run in latest["runs"]] == ["1-17", "18-41", "42-48"]
+    assert all(
+        a["init_utc"] > b["init_utc"]
+        for a, b in zip(latest["runs"], previous["runs"], strict=True)
+    )
     with pytest.raises(ValueError):
         weather.fetch_weather("13.02.2026")
     with pytest.raises(ValueError):

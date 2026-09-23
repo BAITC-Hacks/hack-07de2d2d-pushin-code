@@ -12,13 +12,23 @@ import pandas as pd
 import requests
 
 from windcast.paths import weather_cache_dir
-from windcast.timeline import issue_time_utc, live_times, target_times_utc
+from windcast.timeline import (
+    HORIZON,
+    issue_time_utc,
+    lead_days,
+    live_times,
+    published_before_issue,
+    target_times_utc,
+)
 
 PREVIOUS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 LIVE_URL = "https://api.open-meteo.com/v1/forecast"
 LATITUDES = "43.645150,43.643198"
 LONGITUDES = "78.535604,78.538828"
 MODEL = "best_match"
+# previous_day1..4: contract v0.4 §2 needs day1-3 for "latest" and day2-4 for "previous".
+ISSUE_LAGS = (1, 2, 3, 4)
+TRAINING_LAGS = (1, 2)
 BASE_FIELDS = (
     "wind_speed_100m",
     "wind_speed_10m",
@@ -31,9 +41,11 @@ class WeatherUnavailable(RuntimeError):
     """Raised only after both an operational request and valid cache fail."""
 
 
-def previous_runs_url(start_date: str, end_date: str) -> str:
+def previous_runs_url(
+    start_date: str, end_date: str, lags: tuple[int, ...] = ISSUE_LAGS
+) -> str:
     hourly = ",".join(
-        f"{field}_previous_day{lag}" for field in BASE_FIELDS for lag in (1, 2)
+        f"{field}_previous_day{lag}" for field in BASE_FIELDS for lag in lags
     )
     return (
         f"{PREVIOUS_URL}?latitude={LATITUDES}&longitude={LONGITUDES}&hourly={hourly}"
@@ -45,7 +57,7 @@ def _cache_path(name: str) -> Path:
     return weather_cache_dir() / name
 
 
-def _validate(payload: object) -> dict:
+def _validate(payload: object, lags: tuple[int, ...] = TRAINING_LAGS) -> dict:
     if (
         not isinstance(payload, dict)
         or not isinstance(payload.get("data"), list)
@@ -71,7 +83,7 @@ def _validate(payload: object) -> dict:
             raise ValueError("В ответе Open-Meteo нет почасовых данных")  # noqa: TRY004
         size = len(hourly["time"])
         for field in BASE_FIELDS:
-            for lag in (1, 2):
+            for lag in lags:
                 values = hourly.get(f"{field}_previous_day{lag}")
                 if (
                     not isinstance(values, list)
@@ -91,17 +103,19 @@ def _request_previous(start: str, end: str) -> dict:
     payload = response.json()
     if isinstance(payload, list):
         payload = {"url": str(response.url), "data": payload}
-    return _validate(payload)
+    return _validate(payload, ISSUE_LAGS)
 
 
-def _cached_previous(targets: pd.DatetimeIndex) -> dict:
+def _cached_previous(
+    targets: pd.DatetimeIndex, lags: tuple[int, ...] = TRAINING_LAGS
+) -> dict:
     candidates = [
         _cache_path(f"previous_{targets[0]:%Y-%m-%d}_{targets[-1]:%Y-%m-%d}.json"),
         _cache_path("previous_runs_bulk.json"),
     ]
     for path in candidates:
         try:
-            payload = _validate(json.loads(path.read_text(encoding="utf-8")))
+            payload = _validate(json.loads(path.read_text(encoding="utf-8")), lags)
             available = [
                 pd.to_datetime(site["hourly"]["time"], utc=True)
                 for site in payload["data"]
@@ -150,33 +164,36 @@ def _rows(payload: dict, targets: pd.DatetimeIndex, lags: list[int]) -> pd.DataF
                 "h": h,
                 "target_time_utc": target,
                 **values,
-                "init_time_utc": target - pd.Timedelta(days=lag),
+                # upper bound of the run start: the previous_dayN value comes from a run
+                # started at most N days before the target, on the 00/06/12/18 UTC grid
+                "init_time_utc": (target - pd.Timedelta(days=lag)).floor("6h"),
             }
         )
     return pd.DataFrame(records)
 
 
-def _runs(frame: pd.DataFrame) -> list[dict]:
-    return [
-        {
-            "hours": "1-24",
-            "model": MODEL,
-            "init_utc": frame.iloc[:24]["init_time_utc"]
-            .max()
-            .isoformat()
-            .replace("+00:00", "Z"),
-            "provenance": "upper_bound",
-        },
-        {
-            "hours": "25-48",
-            "model": MODEL,
-            "init_utc": frame.iloc[24:]["init_time_utc"]
-            .max()
-            .isoformat()
-            .replace("+00:00", "Z"),
-            "provenance": "upper_bound",
-        },
-    ]
+def _runs(frame: pd.DataFrame, lags: list[int] | None = None) -> list[dict]:
+    """One entry per contiguous block of hours served by the same previous_dayN."""
+    if lags is None:  # live snapshots: one fetch for the whole window
+        lags = [0] * len(frame)
+    runs: list[dict] = []
+    start = 0
+    for i in range(1, len(frame) + 1):
+        if i == len(frame) or lags[i] != lags[start]:
+            block = frame.iloc[start:i]
+            runs.append(
+                {
+                    "hours": f"{int(block['h'].iloc[0])}-{int(block['h'].iloc[-1])}",
+                    "model": MODEL,
+                    "init_utc": block["init_time_utc"]
+                    .max()
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "provenance": "upper_bound",
+                }
+            )
+            start = i
+    return runs
 
 
 def fetch_weather(issue_date: str, run: str = "latest") -> dict:
@@ -188,9 +205,9 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
         return _fetch_live()
     issue = issue_time_utc(issue_date)
     targets = pd.DatetimeIndex(target_times_utc(issue_date))
+    lags = [lead_days(h, previous=run == "previous") for h in range(1, HORIZON + 1)]
     try:
         payload = _request_previous(str(targets[0].date()), str(targets[-1].date()))
-        lags = [2] * 48 if run == "previous" else [1] * 24 + [2] * 24
         hourly = _rows(payload, targets, lags)
         cache = _cache_path(
             f"previous_{targets[0]:%Y-%m-%d}_{targets[-1]:%Y-%m-%d}.json"
@@ -199,17 +216,19 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
         cache.write_text(json.dumps(payload), encoding="utf-8")
         source = "api"
     except (requests.RequestException, ValueError, json.JSONDecodeError):
-        payload = _cached_previous(targets)
+        payload = _cached_previous(targets, tuple(sorted(set(lags))))
         source = "cache"
-        lags = [2] * 48 if run == "previous" else [1] * 24 + [2] * 24
         hourly = _rows(payload, targets, lags)
-    if not (hourly["init_time_utc"] <= issue).all():
-        raise WeatherUnavailable("Прогон погоды новее момента выпуска")
+    if not all(
+        published_before_issue(init.to_pydatetime(), issue_date)
+        for init in hourly["init_time_utc"]
+    ):
+        raise WeatherUnavailable("Прогон погоды опубликован позже момента выпуска")
     return {
         "issue_date": issue_date,
         "issue_time_utc": issue,
         "hourly": hourly,
-        "runs": _runs(hourly),
+        "runs": _runs(hourly, lags),
         "source": source,
     }
 
@@ -218,9 +237,9 @@ def fetch_training_weather(start_utc: str, end_utc: str) -> pd.DataFrame:
     targets = pd.date_range(
         pd.Timestamp(start_utc), pd.Timestamp(end_utc), freq="h", tz="UTC"
     )
-    payload = _cached_previous(targets)
+    payload = _cached_previous(targets, TRAINING_LAGS)
     frames = []
-    for lag in (1, 2):
+    for lag in TRAINING_LAGS:
         frame = _rows(payload, targets, [lag] * len(targets))
         frame["lag_days"] = lag
         frame["source"] = "cache"

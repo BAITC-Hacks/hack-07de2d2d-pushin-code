@@ -76,7 +76,9 @@ def build_feature_frame(
             frame["lag_days"] = pd.to_numeric(frame["lag_days"], errors="coerce")
         elif "init_time_utc" in frame:
             init = _utc(frame["init_time_utc"])
-            frame["lag_days"] = (target - init).total_seconds() / 86_400
+            # init is the upper bound of the run start, floored to 00/06/12/18 UTC
+            # (contract v0.4 §2), so the whole-day lag is the floor of the difference
+            frame["lag_days"] = np.floor((target - init).total_seconds() / 86_400)
         else:
             frame["lag_days"] = np.where(frame["h"] <= 24, 1, 2)
     else:
@@ -84,8 +86,11 @@ def build_feature_frame(
     frame["turbine_id"] = {"1": 1, "2": 2, "plant": 3}[turbine]
     if not np.isfinite(frame[FEATURE_COLUMNS].to_numpy(dtype=float)).all():
         raise ValueError("Погодные признаки должны быть конечными")
+    # Trained on previous_day1/2. Older runs (day3/day4 serve the last hours under the
+    # 8 h publication rule of contract v0.4) use the day2 behaviour.
+    frame["lag_days"] = frame["lag_days"].clip(upper=2)
     if not frame["lag_days"].isin((1, 2)).all():
-        raise ValueError("Погодный лаг должен быть ровно 1 или 2 суток")
+        raise ValueError("Погодный лаг должен быть не меньше 1 суток")
     return frame[FEATURE_COLUMNS].copy()
 
 
