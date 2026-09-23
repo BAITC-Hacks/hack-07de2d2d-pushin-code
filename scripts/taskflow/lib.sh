@@ -289,6 +289,19 @@ tf_branch_state_file() {
   printf '%s/%s.state\n' "$state_dir" "$digest"
 }
 
+tf_recorded_base() {
+  local path=$1 branch=$2 state_file base
+  state_file=$(tf_branch_state_file "$path" "$branch") || return 1
+  if [ -f "$state_file" ]; then
+    base=$(sed -n 's/^base=//p' "$state_file" | head -1)
+    if [ -n "$base" ]; then
+      tf_normalize_base "$base"
+      return 0
+    fi
+  fi
+  tf_default_base "$path"
+}
+
 tf_sha256() {
   if tf_command_exists shasum; then
     shasum -a 256 | awk '{print $1}'
@@ -692,7 +705,12 @@ tf_verify() {
   }
   branch=$(tf_current_branch "$root") || true
   [ -n "$branch" ] || branch=DETACHED
-  base=$(tf_default_base "$root") || return 1
+  if [ "$branch" = DETACHED ]; then
+    base=$(tf_default_base "$root") || return 1
+  else
+    base=$(tf_recorded_base "$root" "$branch") || return 1
+  fi
+  tf_base_ref "$root" "$base" >/dev/null || return 1
   receipt_dir=$(tf_receipt_dir "$root") || return 1
   mkdir -p "$receipt_dir"
   receipt="$receipt_dir/$commit.receipt"

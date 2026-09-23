@@ -11,3 +11,12 @@ FastAPI + пакет `windcast`. Порт 8000. Контракт — `docs/CONTR
 - `Dockerfile` собирается с контекстом **корня** репозитория (нужны `data/` и `models/`): в compose
   `build: {context: ., dockerfile: backend/Dockerfile}`. Слушает `0.0.0.0:8000`, `GET /health`.
 - `requirements.txt` — версии через `==`. Ключ OpenAI — только из окружения; без ключа — детерминированный режим.
+
+## T1 · почасовой SCADA
+
+`python -m windcast.data` читает два исходных CSV и создаёт некоммитимый
+`data/processed/hourly.parquet` со схемой `ts_utc, turbine, wind_ms, power, temp_c, valid`.
+Команда печатает реальные часы и долю `valid` по каждой турбине. Неполный час, простой
+(`power < 0.02` при `wind_ms > 5`) и период T1 18.05–17.07.2024 получают `valid=false`.
+Смещение местного времени SCADA задаётся `SCADA_UTC_OFFSET_H=5` или `6`; по умолчанию 5,
+а T3 выбирает кандидат по январскому бэктесту.
