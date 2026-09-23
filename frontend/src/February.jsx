@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AgentPanel from './AgentPanel';
 import ForecastChart from './ForecastChart';
 import useAgentRun from './useAgentRun';
-import { ApiError, createSelectionLoader, weatherRunIsBeforeIssue } from './api';
+import { ApiError, createSelectionLoader, parseRunEvents, weatherRunIsBeforeIssue } from './api';
 import { dayLabel, rangeLabel, localFromUtc, localStamp, nextDay, pct, shortDate, utcLabel, weekday } from './format';
 
 const TURBINES = [
@@ -12,6 +12,21 @@ const TURBINES = [
 ];
 
 const DEMO_DAY = '2026-02-13';
+// Playback speed: pause between agent steps and after each issue, divided by the multiplier.
+const SPEEDS = [0.5, 1, 2, 4];
+const STEP_MS = 40;
+const DAY_MS = 800;
+
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+function stepsUntilVerdict(trace) {
+  let events = [];
+  try { events = parseRunEvents(trace); } catch { return []; }
+  const end = events.findIndex((event) => event.type === 'verdict');
+  return end >= 0 ? events.slice(0, end + 1) : events;
+}
 
 function errorText(error) {
   return error instanceof ApiError ? error.message : 'Не удалось получить данные. Проверьте, что backend запущен.';
@@ -188,8 +203,15 @@ export default function February({ api, active }) {
   const [turbine, setTurbine] = useState('plant');
   const [selection, setSelection] = useState({ loading: true, data: null, error: null });
   const [reloadKey, setReloadKey] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  // Playback: 'idle' | 'playing' | 'paused'; position survives a pause.
+  const [play, setPlay] = useState('idle');
+  const [speed, setSpeed] = useState(1);
   const playRef = useRef(false);
+  const genRef = useRef(0);
+  const speedRef = useRef(1);
+  const posRef = useRef({ index: 0, step: 0 });
+  const tracesRef = useRef(new Map());
+  const playing = play !== 'idle';
   const agent = useAgentRun(api);
   const loader = useMemo(() => createSelectionLoader(api), [api]);
 
@@ -236,29 +258,106 @@ export default function February({ api, active }) {
     setReloadKey((key) => key + 1);
   };
 
-  const playFebruary = async () => {
-    if (playRef.current) {
-      playRef.current = false;
-      agent.stop();
-      setPlaying(false);
-      return;
-    }
-    playRef.current = true;
-    setPlaying(true);
-    for (const issue of issues) {
-      if (!playRef.current) break;
-      setSelected(issue.issue_date);
+  const loadSteps = async (issueDate) => {
+    if (!tracesRef.current.has(issueDate)) {
+      let steps = [];
+      let recorded = null;
       try {
-        const trace = await api.getTrace(issue.issue_date);
-        if (!playRef.current) break;
-        await agent.replay(trace, { delayMs: 22, caption: `Воспроизведение · выпуск ${shortDate(issue.issue_date)}${trace.recorded_at ? ` · запись от ${localStamp(trace.recorded_at)}` : ''}` });
+        const trace = await api.getTrace(issueDate);
+        steps = stepsUntilVerdict(trace);
+        recorded = trace?.recorded_at || null;
       } catch {
         // A missing trace should not stop the whole month.
       }
+      tracesRef.current.set(issueDate, { steps, recorded });
     }
-    playRef.current = false;
-    setPlaying(false);
+    return tracesRef.current.get(issueDate);
   };
+
+  const playCaption = (issueDate, recorded, paused = false) =>
+    `${paused ? 'Пауза' : 'Воспроизведение'} · выпуск ${shortDate(issueDate)}${recorded ? ` · запись от ${localStamp(recorded)}` : ''}`;
+
+  const runLoop = async () => {
+    const gen = ++genRef.current;
+    const alive = () => genRef.current === gen;
+    while (alive() && posRef.current.index < issues.length) {
+      const { index } = posRef.current;
+      const issueDate = issues[index].issue_date;
+      setSelected(issueDate);
+      const { steps, recorded } = await loadSteps(issueDate);
+      if (!alive()) return;
+      for (let step = posRef.current.step; step < steps.length; step += 1) {
+        agent.frame(steps.slice(0, step + 1), playCaption(issueDate, recorded), true);
+        posRef.current = { index, step: step + 1 };
+        await sleep(STEP_MS / speedRef.current);
+        if (!alive()) return;
+      }
+      agent.frame(steps, playCaption(issueDate, recorded), false);
+      await sleep(DAY_MS / speedRef.current);
+      if (!alive()) return;
+      posRef.current = { index: index + 1, step: 0 };
+    }
+    if (!alive()) return;
+    genRef.current += 1;
+    playRef.current = false;
+    posRef.current = { index: 0, step: 0 };
+    setPlay('idle');
+  };
+
+  const startFrom = (issueDate) => {
+    const index = Math.max(0, issues.findIndex((item) => item.issue_date === issueDate));
+    posRef.current = { index, step: 0 };
+    playRef.current = true;
+    setPlay('playing');
+    runLoop();
+  };
+
+  const pausePlayback = () => {
+    if (play !== 'playing') return;
+    genRef.current += 1;
+    setPlay('paused');
+    const { index } = posRef.current;
+    const issueDate = issues[index]?.issue_date;
+    const cached = issueDate && tracesRef.current.get(issueDate);
+    if (cached) agent.frame(cached.steps.slice(0, posRef.current.step), playCaption(issueDate, cached.recorded, true), false);
+  };
+
+  const resumePlayback = () => {
+    if (play !== 'paused') return;
+    playRef.current = true;
+    setPlay('playing');
+    runLoop();
+  };
+
+  const stopPlayback = () => {
+    genRef.current += 1;
+    playRef.current = false;
+    posRef.current = { index: 0, step: 0 };
+    setPlay('idle');
+    api.getTrace(selected)
+      .then((trace) => agent.show(trace, trace.recorded_at ? `Запись прогона от ${localStamp(trace.recorded_at)}` : 'Сохранённая лента'))
+      .catch(() => agent.show(null, null));
+  };
+
+  const changeSpeed = (value) => {
+    speedRef.current = value;
+    setSpeed(value);
+  };
+
+  // A click on a day while playing jumps there; while paused it moves the resume point.
+  const pickDay = (day) => {
+    if (play === 'playing') { startFrom(day); return; }
+    if (play === 'paused') {
+      const index = Math.max(0, issues.findIndex((item) => item.issue_date === day));
+      posRef.current = { index, step: 0 };
+      setSelected(day);
+      agent.frame([], playCaption(day, tracesRef.current.get(day)?.recorded, true), false);
+      return;
+    }
+    setSelected(day);
+  };
+
+  useEffect(() => () => { genRef.current += 1; }, []);
 
   const current = selection.data?.current;
   const previous = selection.data?.previous;
@@ -277,9 +376,28 @@ export default function February({ api, active }) {
             Всё, что правее на графике, она ещё не видела.
           </p>
           <div className="tm-actions">
-            <button type="button" className="btn" id="play-february" onClick={playFebruary} disabled={!issues.length}>
-              {playing ? 'Остановить' : '▶ Воспроизвести февраль'}
-            </button>
+            {play === 'idle' && (
+              <>
+                <button type="button" className="btn" id="play-february" onClick={() => startFrom(issues[0]?.issue_date)} disabled={!issues.length || agent.running}>
+                  ▶ Воспроизвести февраль
+                </button>
+                {issues.length > 0 && selected !== issues[0]?.issue_date && (
+                  <button type="button" className="btn" id="play-from-day" onClick={() => startFrom(selected)} disabled={agent.running}>
+                    ▶ С {shortDate(selected)}
+                  </button>
+                )}
+              </>
+            )}
+            {play === 'playing' && <button type="button" className="btn" id="play-pause" onClick={pausePlayback}>❚❚ Пауза</button>}
+            {play === 'paused' && <button type="button" className="btn" id="play-resume" onClick={resumePlayback}>▶ Продолжить с {shortDate(selected)}</button>}
+            {play !== 'idle' && <button type="button" className="btn ghost" id="play-stop" onClick={stopPlayback}>■ Стоп</button>}
+            <div className="seg" role="radiogroup" aria-label="Скорость воспроизведения" id="play-speed">
+              {SPEEDS.map((value) => (
+                <button key={value} type="button" role="radio" aria-checked={speed === value} className={speed === value ? 'on' : ''} onClick={() => changeSpeed(value)}>
+                  {String(value).replace('.', ',')}×
+                </button>
+              ))}
+            </div>
             <a className="btn ghost" href={api.summaryCsvUrl()} download>Все 29 выпусков, CSV</a>
           </div>
         </section>
@@ -287,7 +405,7 @@ export default function February({ api, active }) {
         {issuesError ? (
           <p className="state-error" role="alert">{issuesError} <button type="button" className="link" onClick={loadIssues}>Повторить</button></p>
         ) : (
-          <Calendar issues={issues} selected={selected} onSelect={(day) => !playing && setSelected(day)} playing={playing} />
+          <Calendar issues={issues} selected={selected} onSelect={pickDay} playing={play !== 'idle'} />
         )}
         <p className="calendar-legend">
           высота — средняя выработка · <i className="mark-flag" /> — риски · <i className="mark-recalc" /> — был пересчёт

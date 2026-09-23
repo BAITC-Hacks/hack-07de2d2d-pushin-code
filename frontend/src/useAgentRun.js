@@ -82,5 +82,15 @@ export default function useAgentRun(api) {
     setEvents(trace?.events || []);
   }, []);
 
-  return { events, running, error, caption, start, replay, show, stop, setError };
+  // A single frame of a step-by-step playback driven by the caller.
+  const frame = useCallback((nextEvents, nextCaption, isRunning) => {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setRunning(Boolean(isRunning));
+    setError(null);
+    setCaption(nextCaption || null);
+    setEvents(nextEvents || []);
+  }, []);
+
+  return { events, running, error, caption, start, replay, show, frame, stop, setError };
 }
