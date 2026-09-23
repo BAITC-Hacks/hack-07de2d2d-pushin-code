@@ -24,6 +24,13 @@ assert_contains() {
   printf '%s\n' "$haystack" | grep -F -- "$needle" >/dev/null || fail "missing '$needle'"
 }
 
+assert_not_contains() {
+  local needle=$1 haystack=$2
+  if printf '%s\n' "$haystack" | grep -F -- "$needle" >/dev/null; then
+    fail "unexpected '$needle'"
+  fi
+}
+
 assert_file() {
   [ -f "$1" ] || fail "expected file: $1"
 }
@@ -74,6 +81,7 @@ cat > "$REPO/package.json" <<'EOF'
 }
 EOF
 printf '{}\n' > "$REPO/package-lock.json"
+printf '%s\n' 'nested/.venv/' > "$REPO/.gitignore"
 
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm 'Initial fixture'
@@ -82,11 +90,6 @@ git -C "$REPO" push -q -u origin main
 git -C "$ORIGIN" symbolic-ref HEAD refs/heads/main
 git -C "$REPO" fetch -q origin
 git -C "$REPO" remote set-head origin -a >/dev/null
-
-# Verification must not mistake a nested virtual environment's dependencies for
-# first-party package roots.
-mkdir -p "$REPO/nested/.venv/ignored-package"
-printf '%s\n' 'from setuptools import setup' > "$REPO/nested/.venv/ignored-package/setup.py"
 
 cat > "$FAKEBIN/ruff" <<'EOF'
 #!/usr/bin/env bash
@@ -151,6 +154,12 @@ start_output=$("$REPO/scripts/taskflow/tf.sh" start 'Add fixture endpoint' --nam
 assert_contains 'status=created' "$start_output"
 [ "$(git -C "$WORKTREE" branch --show-current)" = endpoint ] || fail 'wrong task branch'
 
+# Verification must not mistake a nested virtual environment's dependencies for
+# first-party package roots in the actual task worktree.
+mkdir -p "$WORKTREE/nested/.venv/ignored-package"
+printf '%s\n' 'from setuptools import setup' > "$WORKTREE/nested/.venv/ignored-package/setup.py"
+[ -z "$(git -C "$WORKTREE" status --porcelain)" ] || fail 'ignored nested venv dirtied worktree'
+
 resume_output=$("$REPO/scripts/taskflow/tf.sh" start 'Add fixture endpoint' --name endpoint --base main --path "$WORKTREE")
 assert_contains 'status=existing' "$resume_output"
 
@@ -167,6 +176,7 @@ assert_contains 'Ruff check' "$(cat "$receipt")"
 assert_contains 'JavaScript frozen dependency install' "$(cat "$receipt")"
 assert_contains 'JavaScript clean build' "$(cat "$receipt")"
 assert_contains 'npm ci' "$(cat "$TASKFLOW_LOG")"
+assert_not_contains 'ignored-package' "$(cat "$receipt")"
 
 BODY="$TEST_TMP/body.md"
 printf '%s\n' 'Implement the fixture endpoint.' > "$BODY"
