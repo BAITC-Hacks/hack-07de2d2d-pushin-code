@@ -102,8 +102,13 @@ def _cached_previous(targets: pd.DatetimeIndex) -> dict:
     for path in candidates:
         try:
             payload = _validate(json.loads(path.read_text(encoding="utf-8")))
-            available = pd.to_datetime(payload["data"][0]["hourly"]["time"], utc=True)
-            if targets.isin(available).all():
+            available = [
+                pd.to_datetime(site["hourly"]["time"], utc=True)
+                for site in payload["data"]
+            ]
+            if all(
+                index.is_unique and targets.isin(index).all() for index in available
+            ):
                 return payload
         except (OSError, ValueError, json.JSONDecodeError):
             continue
@@ -128,6 +133,10 @@ def _rows(payload: dict, targets: pd.DatetimeIndex, lags: list[int]) -> pd.DataF
             ("wind_direction_100m", "wind_dir_deg"),
             ("temperature_2m", "temp_c"),
         ):
+            if any(not index.is_unique or target not in index for index in indexes):
+                raise ValueError(
+                    "Ответ Open-Meteo не покрывает требуемый почасовой горизонт"
+                )
             values[output] = sum(
                 float(
                     site["hourly"][f"{source}_previous_day{lag}"][

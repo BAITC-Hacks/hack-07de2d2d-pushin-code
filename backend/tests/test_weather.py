@@ -82,6 +82,25 @@ def test_previous_keeps_two_run_groups_and_rejects_bad_input(
         weather.fetch_weather("2026-02-13", run="bad")
 
 
+def test_truncated_api_never_overwrites_valid_cache(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = _payload()
+    monkeypatch.setattr(
+        weather.requests, "get", lambda *args, **kwargs: _Response(good)
+    )
+    cached = weather.fetch_weather("2026-02-13")
+    bad = _payload()
+    for site in bad["data"]:
+        for key, values in site["hourly"].items():
+            if isinstance(values, list):
+                site["hourly"][key] = values[:20]
+    monkeypatch.setattr(weather.requests, "get", lambda *args, **kwargs: _Response(bad))
+    recovered = weather.fetch_weather("2026-02-13")
+    assert recovered["source"] == "cache"
+    pd.testing.assert_frame_equal(cached["hourly"], recovered["hourly"])
+
+
 def test_test_only_fastapi_adapter_and_corrupt_cache(
     weather_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
