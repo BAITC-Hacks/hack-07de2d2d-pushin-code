@@ -242,6 +242,7 @@ def test_health_counts_records_and_reads_model_version(client, monkeypatch):
     assert set(body.pop("ports")) == {"weather", "data", "model"}
     assert body == {
         "ok": True,
+        "ask": True,
         "mode": "deterministic",
         "model_version": "lgbm-q-test",
         "issues_ready": 1,  # 13.02 only; the half-written 14.02 does not count
