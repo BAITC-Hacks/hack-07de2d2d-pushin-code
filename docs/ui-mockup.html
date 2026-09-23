@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0">
+<title>Макет Windcast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Onest:wght@400;500;600;700&display=swap">
+<style>
+/* Deliberately single-theme: a dispatcher control-room screen. Every color is painted explicitly. */
+:root{
+  color-scheme:dark;
+  --ground:#0C1216; --panel:#121B21; --raise:#18242B; --line:#243540; --line2:#2F4553;
+  --ink:#E4ECEF; --muted:#8B9CA5; --dim:#5E717B;
+  --accent:#7CC4FF; --accent-ink:#06202E; --band:rgba(124,196,255,.20);
+  --ok:#63D2A1; --warn:#F0B45A; --ice:#A9DDF5; --bad:#FF7B72;
+  --sans:"Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --gut:clamp(16px,2.6vw,32px);
+}
+[hidden]{display:none!important}
+body{background:var(--ground); color:var(--ink); font:14px/1.5 var(--sans)}
+button{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.mono{font-family:var(--mono)}
+
+.banner{background:#2A2110; color:var(--warn); font-size:12.5px; padding-block:6px; padding-inline:var(--gut); border-bottom:1px solid #4A3814}
+.banner b{font-weight:600}
+
+.top{display:flex; flex-wrap:wrap; align-items:center; gap:12px 20px; padding-block:12px; padding-inline:var(--gut); border-bottom:1px solid var(--line); background:var(--panel)}
+.brand{display:grid; gap:1px; margin-right:auto}
+.brand .nm{font-size:19px; font-weight:700; letter-spacing:-.01em}
+.brand .nm span{color:var(--accent)}
+.brand .sub{font:12px/1.3 var(--mono); color:var(--muted)}
+.tabs{display:flex; gap:4px; background:var(--ground); border:1px solid var(--line); border-radius:10px; padding:3px; flex-wrap:wrap}
+.tab{border:0; background:transparent; padding:7px 13px; border-radius:7px; cursor:pointer; color:var(--muted); font-weight:500; display:flex; align-items:center; gap:7px}
+.tab[aria-selected="true"]{background:var(--raise); color:var(--ink); box-shadow:inset 0 0 0 1px var(--line2)}
+.tab .live{width:7px; height:7px; border-radius:50%; background:var(--bad); animation:blink 1.6s infinite}
+@keyframes blink{50%{opacity:.25}}
+.topr{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.chip{display:inline-flex; align-items:center; gap:6px; font:500 12px/1 var(--mono); padding:6px 9px; border-radius:999px; border:1px solid var(--line2); color:var(--muted); white-space:nowrap}
+.chip .d{width:7px; height:7px; border-radius:50%; background:var(--ok)}
+.btn{border:1px solid var(--line2); background:var(--raise); border-radius:8px; padding:8px 12px; font-weight:600; font-size:13.5px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn:disabled{opacity:.45; cursor:default}
+.btn.pri{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn.out{background:transparent; border-color:var(--accent); color:var(--accent)}
+
+main{padding-inline:var(--gut); padding-block:18px 48px; display:grid; gap:14px; max-width:1480px; margin:0 auto}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:12px}
+
+.timebar{display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:11px 14px}
+.timebar .tm{display:flex; align-items:center; gap:10px}
+.clock{font:600 13px/1 var(--mono); color:var(--accent); background:rgba(124,196,255,.10); border:1px solid rgba(124,196,255,.35); padding:6px 9px; border-radius:7px; white-space:nowrap}
+.timebar p{margin:0; color:var(--muted)}
+.timebar p b{color:var(--ink); font-weight:600}
+.timebar .rec{margin-left:auto; font:12px/1.3 var(--mono); color:var(--muted)}
+
+.calwrap{padding:12px 14px 14px; display:grid; gap:10px}
+.calhead{display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px}
+.calhead h2{font-size:14px; margin:0; font-weight:600}
+.calhead .lg{color:var(--muted); font-size:12.5px; margin-right:auto}
+.cal{overflow-x:auto; padding-bottom:2px}
+.cells{display:grid; grid-template-columns:repeat(29,minmax(34px,1fr)); gap:5px; min-width:1040px}
+.cell{position:relative; height:66px; border:1px solid var(--line); background:var(--ground); border-radius:7px; cursor:pointer; padding:0; display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; transition:opacity .2s}
+.cell:hover{border-color:var(--line2)}
+.cell.on{border-color:var(--accent); background:var(--raise)}
+.cell.fut{opacity:.22}
+.cell .dn{position:absolute; top:5px; left:6px; font:600 12px/1 var(--mono)}
+.cell .mo{position:absolute; top:19px; left:6px; font:10px/1 var(--sans); color:var(--muted)}
+.cell .fd{position:absolute; top:6px; right:6px; width:6px; height:6px; border-radius:50%; background:var(--warn)}
+.cell .vb{position:absolute; top:31px; left:5px; font:600 9.5px/1 var(--mono); color:var(--accent); border:1px solid rgba(124,196,255,.5); border-radius:4px; padding:1px 3px}
+.cell .bar{display:block; background:linear-gradient(to top, rgba(124,196,255,.55), rgba(124,196,255,.18)); margin:0 4px 4px; border-radius:3px}
+
+.work{display:grid; grid-template-columns:minmax(0,1fr) 390px; gap:14px; align-items:start}
+@media (max-width:980px){ .work{grid-template-columns:1fr} }
+
+.fc{padding:14px 16px 16px; display:grid; gap:12px}
+.fch{display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px}
+.fch h1{font-size:18px; margin:0; font-weight:650; text-wrap:balance; margin-right:auto}
+.fch h1 small{display:block; font:500 12.5px/1.4 var(--sans); color:var(--muted); margin-top:2px}
+.vchip{font:600 12px/1 var(--mono); padding:6px 8px; border-radius:6px; background:rgba(124,196,255,.12); color:var(--accent); border:1px solid rgba(124,196,255,.4); white-space:nowrap}
+.seg{display:flex; background:var(--ground); border:1px solid var(--line); border-radius:8px; padding:2px}
+.seg button{border:0; background:transparent; padding:5px 10px; border-radius:6px; cursor:pointer; color:var(--muted); font-weight:600; font-size:12.5px}
+.seg button[aria-pressed="true"]{background:var(--raise); color:var(--ink)}
+.honest{border:1px solid rgba(99,210,161,.5); background:rgba(99,210,161,.10); color:var(--ok); border-radius:8px; padding:6px 10px; font-weight:600; font-size:12.5px; cursor:pointer; white-space:nowrap}
+.honest[aria-expanded="true"]{background:rgba(99,210,161,.2)}
+
+.prov{border:1px solid rgba(99,210,161,.35); border-radius:10px; background:rgba(99,210,161,.05); overflow-x:auto}
+.prov table{border-collapse:collapse; width:100%; min-width:560px; font-size:13px}
+.prov td{padding:8px 12px; border-bottom:1px solid rgba(99,210,161,.18)}
+.prov tr:last-child td{border-bottom:0}
+.prov td:last-child{font-family:var(--mono); color:var(--ok); white-space:nowrap}
+.prov .foot{padding:8px 12px; color:var(--muted); font-size:12.5px; border-top:1px solid rgba(99,210,161,.18)}
+
+.chartw{position:relative; transition:opacity .3s}
+.chartw.pending{opacity:.2}
+.chartw svg{display:block; width:100%; height:auto}
+.chartw text{font-family:var(--mono); font-size:11px; fill:var(--muted)}
+.chartw .dl{fill:var(--ink); font-weight:600}
+.tip{position:absolute; pointer-events:none; background:var(--raise); border:1px solid var(--line2); border-radius:8px; padding:7px 9px; font:12px/1.45 var(--mono); white-space:nowrap; transform:translate(-50%,-100%); z-index:2}
+.tip b{color:var(--accent)}
+
+.flags{display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center}
+.lg-i{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted)}
+.sw-l{width:18px; height:0; border-top:2.5px solid var(--accent)}
+.sw-b{width:18px; height:10px; background:var(--band); border-radius:2px}
+.sw-v{width:18px; height:0; border-top:2px dashed var(--muted)}
+.fl{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:4px 8px; border-radius:6px; border:1px solid}
+.fl.ramp{color:var(--warn); border-color:rgba(240,180,90,.45); background:rgba(240,180,90,.08)}
+.fl.ice{color:var(--ice); border-color:rgba(169,221,245,.4); background:rgba(169,221,245,.07)}
+.fl.none{color:var(--ok); border-color:rgba(99,210,161,.4)}
+.acts{display:flex; flex-wrap:wrap; gap:8px; padding-top:4px; border-top:1px solid var(--line)}
+.acts .sp{flex:1}
+
+.agent{padding:14px 14px 12px; display:grid; gap:12px}
+.agh{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.agh h2{font-size:15px; margin:0; font-weight:650; margin-right:auto}
+.stepper{display:grid; grid-template-columns:repeat(3,1fr); gap:5px}
+.stg{font-size:12px; font-weight:600; padding:6px 7px; border-radius:7px; border:1px solid var(--line); color:var(--dim); display:flex; align-items:center; gap:6px; background:var(--ground)}
+.stg i{width:7px; height:7px; border-radius:50%; background:var(--line2); flex:none}
+.stg.done{color:var(--ink); border-color:rgba(99,210,161,.45)} .stg.done i{background:var(--ok)}
+.stg.run{color:var(--accent); border-color:var(--accent)} .stg.run i{background:var(--accent); animation:blink 1s infinite}
+.stg.skip{color:var(--muted); border-style:dashed} .stg.skip i{background:transparent; border:1.5px solid var(--muted)}
+.stcap{font-size:11.5px; color:var(--dim); margin-top:-6px}
+.trace{list-style:none; margin:0; padding:0; display:grid; gap:2px; max-height:430px; overflow:auto}
+.st{display:grid; grid-template-columns:22px 1fr; gap:9px; padding:8px 6px; border-radius:8px}
+.st.new{animation:in .35s ease}
+@keyframes in{from{opacity:0; transform:translateY(4px)}}
+.st .no{width:22px; height:22px; border-radius:50%; background:var(--raise); border:1px solid var(--line2); font:600 11px/20px var(--mono); text-align:center; color:var(--muted)}
+.st.run{background:rgba(124,196,255,.06)}
+.st.run .no{border-color:var(--accent); color:var(--accent)}
+.st .tl{display:flex; align-items:center; gap:8px}
+.st code{font:600 12.5px/1.3 var(--mono); color:var(--ink)}
+.st .act{font:600 10px/1 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--accent-ink); background:var(--accent); padding:3px 5px; border-radius:4px}
+.st .ic{margin-left:auto; font:600 12px/1 var(--mono); color:var(--ok)}
+.st.warn .ic{color:var(--warn)}
+.st.skip .ic{color:var(--muted)}
+.st .dt{font-size:12.5px; color:var(--ink); margin-top:3px}
+.st.skip .dt{color:var(--muted)}
+.st .why{font-size:12px; color:var(--muted); margin-top:2px; font-style:italic}
+.spin{display:inline-block; width:11px; height:11px; border:2px solid rgba(124,196,255,.3); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.summary{border-top:1px solid var(--line); padding-top:11px; display:grid; gap:5px}
+.summary h3{margin:0; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); font-weight:600}
+.summary p{margin:0; font-size:13.5px; line-height:1.55}
+
+/* Quality */
+.q{display:grid; gap:14px}
+.tiles{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px}
+@media (max-width:820px){ .tiles{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.tile{padding:13px 14px; display:grid; gap:4px}
+.tile .v{font:600 26px/1.1 var(--mono); letter-spacing:-.02em}
+.tile .v.good{color:var(--ok)}
+.tile .k{font-size:12.5px; color:var(--muted)}
+.qg{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px}
+@media (max-width:900px){ .qg{grid-template-columns:1fr} }
+.qc{padding:14px 16px; display:grid; gap:10px}
+.qc h2{font-size:14.5px; margin:0; font-weight:650}
+.qc .cap{font-size:12.5px; color:var(--muted); margin:0}
+.bars{display:grid; gap:9px}
+.brow{display:grid; grid-template-columns:minmax(120px,190px) 1fr 58px; gap:10px; align-items:center; font-size:13px}
+.brow .tr{height:12px; background:var(--ground); border-radius:3px; overflow:hidden; border:1px solid var(--line)}
+.brow .fi{height:100%; background:var(--dim)}
+.brow.me .fi{background:var(--accent)}
+.brow .val{font:600 12.5px/1 var(--mono); text-align:right}
+.brow.me{font-weight:600}
+.note{font-size:12.5px; color:var(--muted); padding:10px 14px}
+.note b{color:var(--warn); font-weight:600}
+
+/* Live */
+.livebar{display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; padding:11px 14px}
+.livebar .kv{display:grid; gap:1px}
+.livebar .kv span{font-size:11.5px; color:var(--muted)}
+.livebar .kv b{font:600 13px/1.3 var(--mono)}
+
+/* Drawer */
+.scrim{position:fixed; inset:0; background:rgba(4,8,10,.55); z-index:20}
+.drawer{position:fixed; top:0; right:0; bottom:0; width:min(440px,100%); background:var(--panel); border-left:1px solid var(--line2); z-index:21; padding:calc(18px + env(safe-area-inset-top,0px)) 18px calc(18px + env(safe-area-inset-bottom,0px)); overflow:auto; display:grid; gap:14px; align-content:start}
+.drawer h2{margin:0; font-size:17px}
+.drawer p{margin:0; color:var(--muted); font-size:13px}
+.chk{list-style:none; padding:0; margin:0; display:grid; gap:8px}
+.chk li{display:grid; grid-template-columns:1fr auto; gap:4px 10px; align-items:center; padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:var(--ground)}
+.chk .rq{font-weight:600; font-size:13.5px}
+.chk .wh{grid-column:1; font-size:12.5px; color:var(--muted)}
+.chk .btn{grid-row:1 / span 2; grid-column:2; padding:6px 10px; font-size:12.5px}
+
+.pulse{animation:pulse 1.2s ease 2; border-radius:10px}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(124,196,255,0)} 50%{box-shadow:0 0 0 4px rgba(124,196,255,.55)}}
+
+.toast{position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%); background:var(--raise); border:1px solid var(--line2); color:var(--ink); padding:10px 14px; border-radius:9px; font-size:13px; z-index:30; max-width:calc(100% - 32px); box-shadow:0 8px 30px rgba(0,0,0,.4)}
+
+@media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
+</style>
+
+<div class="banner"><b>Макет интерфейса для команды.</b> Все числа сгенерированы для примера — это не наши результаты.</div>
+
+<header class="top">
+  <div class="brand">
+    <div class="nm">Wind<span>cast</span></div>
+    <div class="sub">ВЭС · 2 турбины · 43.645, 78.536</div>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Режим">
+    <button class="tab" role="tab" id="t-feb" aria-selected="true" data-tab="feb">Февраль 2026 · тест</button>
+    <button class="tab" role="tab" id="t-live" aria-selected="false" data-tab="live"><span class="live"></span>Live · сейчас</button>
+    <button class="tab" role="tab" id="t-q" aria-selected="false" data-tab="q">Качество</button>
+  </div>
+  <div class="topr">
+    <span class="chip" title="Без ключа OpenAI агент идёт по тем же шагам по правилам"><span class="d"></span>агент: LLM</span>
+    <button class="btn out" id="open-tester">Как проверить за 3 минуты</button>
+  </div>
+</header>
+
+<main>
+
+<!-- ================= FEBRUARY ================= -->
+<section id="tab-feb" class="work-tab" style="display:grid; gap:14px">
+  <div class="card timebar" id="timebar">
+    <div class="tm"><span class="clock" id="feb-clock">13.02.2026 24:00</span></div>
+    <p>Для системы сейчас <b id="feb-clock2">13.02.2026 24:00</b> по Астане. Всё правее этого момента она не видела.</p>
+    <span class="rec" id="feb-rec">выпуски — запись прогона агента от 23.09 15:40</span>
+  </div>
+
+  <div class="card calwrap" id="calcard">
+    <div class="calhead">
+      <h2>Выпуски 31.01 → 28.02</h2>
+      <span class="lg">высота — средняя выработка · точка — риск · v2 — был пересчёт</span>
+      <button class="btn pri" id="btn-play">▶ Воспроизвести февраль</button>
+      <button class="btn ghost" id="btn-csv-all">⬇ Весь февраль CSV</button>
+    </div>
+    <div class="cal"><div class="cells" id="cells"></div></div>
+  </div>
+
+  <div class="work">
+    <div class="card fc" id="feb-card">
+      <div class="fch">
+        <h1 id="feb-title">Выпуск 13.02<small>прогноз на 14–15.02 · 48 часов</small></h1>
+        <span class="vchip" id="feb-ver">v2 · пересчитан</span>
+        <div class="seg" id="feb-seg" role="group" aria-label="Турбина">
+          <button aria-pressed="true" data-t="plant">ВЭС</button><button aria-pressed="false" data-t="t1">Т1</button><button aria-pressed="false" data-t="t2">Т2</button>
+        </div>
+        <button class="honest" id="btn-honest" aria-expanded="false" aria-controls="prov">✓ Без будущего</button>
+      </div>
+      <div class="prov" id="prov" hidden></div>
+      <div class="chartw" id="feb-chart"></div>
+      <div class="flags" id="feb-flags"></div>
+      <div class="acts">
+        <button class="btn" id="btn-csv">⬇ CSV выпуска</button>
+        <span class="sp"></span>
+        <button class="btn" id="btn-reissue">↻ Перевыпустить агентом</button>
+        <button class="btn pri" id="btn-newrun">⚡ Новый прогон погоды</button>
+      </div>
+    </div>
+
+    <aside class="card agent" id="feb-agent">
+      <div class="agh"><h2>Агент</h2><span class="chip">function calling</span></div>
+      <div class="stepper" id="feb-stepper"></div>
+      <div class="stcap">этапы цикла — дословно из ТЗ</div>
+      <ol class="trace" id="feb-trace"></ol>
+      <div class="summary"><h3>Сводка для диспетчера</h3><p id="feb-sum"></p></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= LIVE ================= -->
+<section id="tab-live" hidden style="gap:14px">
+  <div class="card livebar">
+    <div class="kv"><span>Сейчас, Астана (UTC+5)</span><b id="live-now">—</b></div>
+    <div class="kv"><span>Последний прогон ECMWF</span><b id="live-last">—</b></div>
+    <div class="kv"><span>Следующий появится</span><b id="live-next">—</b></div>
+    <div class="kv"><span>Агент проверяет обновления</span><b>каждые 30 мин</b></div>
+  </div>
+  <div class="work">
+    <div class="card fc">
+      <div class="fch">
+        <h1 id="live-title">Прогноз на ближайшие 48 часов<small id="live-sub">—</small></h1>
+        <span class="vchip" id="live-ver">v1</span>
+        <div class="seg" id="live-seg" role="group" aria-label="Турбина">
+          <button aria-pressed="true" data-t="plant">ВЭС</button><button aria-pressed="false" data-t="t1">Т1</button><button aria-pressed="false" data-t="t2">Т2</button>
+        </div>
+      </div>
+      <div class="chartw" id="live-chart"></div>
+      <div class="flags" id="live-flags"></div>
+      <div class="acts">
+        <button class="btn" id="btn-live-csv">⬇ CSV</button>
+        <span class="sp"></span>
+        <button class="btn" id="btn-live-check">Проверить обновления погоды</button>
+        <button class="btn pri" id="btn-live-issue">▶ Выпустить прогноз сейчас</button>
+      </div>
+    </div>
+    <aside class="card agent">
+      <div class="agh"><h2>Агент</h2><span class="chip">live</span></div>
+      <div class="stepper" id="live-stepper"></div>
+      <div class="stcap">этапы цикла — дословно из ТЗ</div>
+      <ol class="trace" id="live-trace"></ol>
+      <div class="summary"><h3>Сводка для диспетчера</h3><p id="live-sum"></p></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= QUALITY ================= -->
+<section id="tab-q" hidden class="q">
+  <div class="card note"><b>Цифры — пример.</b> Настоящие придут из <span class="mono">GET /api/metrics</span>. Факта за февраль у нас нет — его сравнит организатор по нашим CSV, поэтому качество показываем на январе 2026.</div>
+  <div class="tiles">
+    <div class="card tile"><div class="v">11,8 %</div><div class="k">ошибка модели, nMAE · январь</div></div>
+    <div class="card tile"><div class="v good">−21 %</div><div class="k">против лучшего простого метода</div></div>
+    <div class="card tile"><div class="v">79 %</div><div class="k">часов факт внутри P10–P90 (цель ≈ 80 %)</div></div>
+    <div class="card tile"><div class="v">30</div><div class="k">выпусков проверено: 31.12 → 29.01</div></div>
+  </div>
+  <div class="qg">
+    <div class="card qc">
+      <h2>Модель против простых методов</h2>
+      <p class="cap">nMAE по всем часам января, меньше — лучше</p>
+      <div class="bars">
+        <div class="brow me"><span>Наша модель</span><div class="tr"><div class="fi" style="width:45%"></div></div><span class="val">11,8 %</span></div>
+        <div class="brow"><span>Кривая мощности по прогнозу ветра</span><div class="tr"><div class="fi" style="width:57%"></div></div><span class="val">14,9 %</span></div>
+        <div class="brow"><span>Средняя по часу и месяцу</span><div class="tr"><div class="fi" style="width:83%"></div></div><span class="val">21,6 %</span></div>
+        <div class="brow"><span>«Завтра как сегодня»</span><div class="tr"><div class="fi" style="width:95%"></div></div><span class="val">24,7 %</span></div>
+      </div>
+    </div>
+    <div class="card qc">
+      <h2>Ошибка по горизонту</h2>
+      <p class="cap">как растёт nMAE от 1-го к 48-му часу</p>
+      <div class="chartw" id="q-h"></div>
+    </div>
+  </div>
+  <div class="card qc">
+    <h2>Прогноз против факта · 15–21 января</h2>
+    <p class="cap">P50 и коридор P10–P90 из выпусков накануне, белая линия — фактическая выработка ВЭС</p>
+    <div class="chartw" id="q-week"></div>
+  </div>
+</section>
+</main>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Как проверить за 3 минуты">
+  <div style="display:flex; align-items:center; gap:10px"><h2 style="margin-right:auto">Как проверить за 3 минуты</h2><button class="btn ghost" id="close-tester">Закрыть</button></div>
+  <p>Каждое требование ТЗ — и где его увидеть. «Показать» переключит экран и подсветит нужное место.</p>
+  <ul class="chk">
+    <li><span class="rq">Прогноз как в прошлом, выпуск за выпуском</span><span class="wh">машина времени и календарь 31.01 → 28.02</span><button class="btn" data-go="cal">Показать</button></li>
+    <li><span class="rq">Только погода, доступная на момент выпуска</span><span class="wh">значок «✓ Без будущего» — время каждого прогона</span><button class="btn" data-go="honest">Показать</button></li>
+    <li><span class="rq">Полный цикл агента</span><span class="wh">шесть этапов из ТЗ над лентой шагов</span><button class="btn" data-go="stepper">Показать</button></li>
+    <li><span class="rq">Повторный расчёт при обновлении данных</span><span class="wh">«⚡ Новый прогон погоды» — агент решает сам</span><button class="btn" data-go="newrun">Показать</button></li>
+    <li><span class="rq">Почасовой прогноз на 24–48 ч</span><span class="wh">график, P10 / P50 / P90, CSV выпуска</span><button class="btn" data-go="chart">Показать</button></li>
+    <li><span class="rq">Работает не только на архиве</span><span class="wh">вкладка Live — прогноз от текущего момента</span><button class="btn" data-go="live">Показать</button></li>
+    <li><span class="rq">Модель лучше простых методов</span><span class="wh">вкладка «Качество», январь 2026</span><button class="btn" data-go="q">Показать</button></li>
+  </ul>
+  <p>Из репозитория: <span class="mono">docker compose up</span> или <span class="mono">python -m windcast.backtest</span>, затем <span class="mono">scripts/verify.py</span>.</p>
+</aside>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep = ms => new Promise(r => setTimeout(r, RM ? Math.min(ms, 60) : ms));
+const pad = n => String(n).padStart(2, '0');
+const dm = d => pad(d.getUTCDate()) + '.' + pad(d.getUTCMonth() + 1);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+const pct = v => Math.round(v * 100) + ' %';
+const f1 = v => v.toFixed(1).replace('.', ',');
+const sgn = v => (v >= 0 ? '+' : '−') + f1(Math.abs(v));
+const H = 3600e3;
+
+function rng(seed){ let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ t >>> 15, 1 | t); r ^= r + Math.imul(r ^ r >>> 7, 61 | r); return ((r ^ r >>> 14) >>> 0) / 4294967296; }; }
+const pcurve = w => w < 3 ? 0 : w >= 11.5 ? (w > 25 ? 0 : 1) : Math.pow((w - 3) / 8.5, 1.35);
+
+function genSeries(seed, shift = 0, n = 48, startHour = 0){
+  const r = rng(seed);
+  const base = 5 + r() * 5, amp = 2.5 + r() * 4, per = 18 + r() * 20, ph = r() * 40, tb = -9 + r() * 8;
+  const raw = Array.from({length: n}, () => (r() - .5) * 2.4);
+  const wind = [], temp = [];
+  for (let h = 0; h < n; h++){
+    const nz = (raw[Math.max(0, h - 1)] + raw[h] + raw[Math.min(n - 1, h + 1)]) / 3;
+    const lh = (h + startHour) % 24;
+    wind.push(clamp(base + amp * Math.sin(2 * Math.PI * (h + ph) / per) + 1.1 * Math.sin(2 * Math.PI * (lh - 14) / 24) + nz + shift, .4, 23));
+    temp.push(tb + 5 * Math.sin(2 * Math.PI * (lh - 9) / 24) + nz * .6);
+  }
+  const r2 = rng(seed + 7);
+  const p50 = [], p10 = [], p90 = [], t1 = [], t2 = [];
+  wind.forEach((w, h) => {
+    const p = pcurve(w) * .96, sp = .05 + .09 * (h % 48) / 47 + .28 * p * (1 - p);
+    p50.push(p); p10.push(clamp(p - sp * 1.1, 0, 1)); p90.push(clamp(p + sp, 0, 1));
+    t1.push(clamp(p * 1.03 + (r2() - .5) * .03, 0, 1)); t2.push(clamp(p * .97 + (r2() - .5) * .03, 0, 1));
+  });
+  return {wind, temp, p50, p10, p90, t1, t2};
+}
+function view(s, t){
+  if (t === 'plant') return {p10: s.p10, p50: s.p50, p90: s.p90};
+  const q = s[t];
+  return {p50: q, p10: q.map((v, h) => clamp(v - (s.p50[h] - s.p10[h]), 0, 1)), p90: q.map((v, h) => clamp(v + (s.p90[h] - s.p50[h]), 0, 1))};
+}
+function flagsOf(s, startHour = 0){
+  const f = [];
+  for (let h = 0; h < s.p50.length - 2; h++){
+    const d = s.p50[h + 2] - s.p50[h];
+    if (Math.abs(d) >= .3){ f.push({kind: 'ramp', from: h, to: h + 2, down: d < 0, amt: Math.abs(d)}); h += 4; }
+  }
+  let st = -1;
+  for (let h = 0; h <= s.temp.length; h++){
+    const lh = (h + startHour) % 24;
+    const ok = h < s.temp.length && s.temp[h] >= -3 && s.temp[h] <= 1 && lh <= 8;
+    if (ok && st < 0) st = h;
+    if (!ok && st >= 0){ if (h - st >= 2) f.push({kind: 'ice', from: st, to: h - 1}); st = -1; }
+  }
+  return f;
+}
+const hm = t => `${dm(t)} ${pad(t.getUTCHours())}:00`;
+function flagLabel(f, times){
+  if (f.kind === 'ramp') return `${f.down ? '↘ спад −' : '↗ рост +'}${Math.round(f.amt * 100)} % за 2 ч · ${hm(times[f.from])}`;
+  return `❄ обледенение · ${hm(times[f.from])}–${pad(times[f.to].getUTCHours())}:00`;
+}
+function flagText(flags, times){ return flags.length ? flags.map(f => (f.kind === 'ramp' ? '⚠ ' : '') + flagLabel(f, times)).join(' · ') : 'рисков нет'; }
+function summaryOf(s, times, flags){
+  const p = s.p50; let mx = 0, mn = 0;
+  p.forEach((v, h) => { if (v > p[mx]) mx = h; if (v < p[mn]) mn = h; });
+  let t = `Пик ${pct(p[mx])} номинала — ${hm(times[mx])}, минимум ${pct(p[mn])} — ${hm(times[mn])}. В среднем за 48 ч — ${pct(avg(p))}.`;
+  const r = flags.find(f => f.kind === 'ramp');
+  if (r) t += ` ${r.down ? 'Резкий спад' : 'Резкий рост'} около ${hm(times[r.from])} — ${r.down ? 'держать резерв' : 'учесть в заявке'}.`;
+  if (flags.some(f => f.kind === 'ice')) t += ' Ночью риск обледенения лопастей — возможны потери.';
+  return t;
+}
+
+/* ---------- February data ---------- */
+const DAYS = 29;
+const issueDate = i => new Date(Date.UTC(2026, 0, 31 + i));
+const timesFor = i => Array.from({length: 48}, (_, h) => new Date(Date.UTC(2026, 0, 32 + i) + h * H));
+const RUNS = ['00:00', '06:00', '12:00'];
+const runLabel = (i, v) => `${dm(issueDate(i))} ${RUNS[v - 1]} UTC`;
+const moment = i => `${dm(issueDate(i))} 19:00 UTC`;
+const V2 = new Set([3, 8, 13, 19, 24]);
+const feb = Array.from({length: DAYS}, (_, i) => {
+  const vs = [];
+  if (V2.has(i)) vs.push({v: 1, shift: i % 2 ? -.9 : .8});
+  vs.push({v: vs.length + 1, shift: 0});
+  vs.forEach(x => { x.s = genSeries(100 + i, x.shift); x.flags = flagsOf(x.s); });
+  return {i, vs, recShift: i % 3 ? .9 : -1.1};
+});
+let sel = 13;
+{ let best = -1; [...V2].forEach(i => { const f = feb[i].vs.at(-1).flags; const sc = f.length + (f.some(x => x.kind === 'ramp') && f.some(x => x.kind === 'ice') ? 5 : 0); if (sc > best){ best = sc; sel = i; } }); }
+let played = DAYS, busy = false, playing = false, febTurb = 'plant', liveTurb = 'plant';
+
+/* ---------- traces ---------- */
+function fullTrace(o){
+  const st = [
+    {tool: 'fetch_weather', stages: ['weather'], detail: `Open-Meteo · ECMWF IFS · прогон ${o.run1} для часов 1–24, ${o.run2} для 25–48 · из API`, why: 'Начинаю с погоды — без неё модель не запустить.'},
+    {tool: 'check_data', stages: ['prep'], detail: `48 из 48 часов · пропусков нет · прогоны вышли до ${o.moment} ✓`, why: 'Проверяю полноту и что погода не из будущего.'},
+    {tool: 'run_model', stages: ['model', 'forecast'], detail: 'LightGBM · 48 ч × Т1, Т2, ВЭС · P10 / P50 / P90', why: 'Данные в порядке — запускаю модель.', model: true},
+    {tool: 'analyze_forecast', stages: ['analysis'], detail: flagText(o.flags, o.times), why: 'Ищу резкие спады, обледенение и ветер выше 20 м/с.', warn: o.flags.length > 0},
+  ];
+  if (o.recalc){
+    st.push({tool: 'fetch_weather', arg: 'run="latest"', stages: ['weather'], detail: `вышел прогон ${o.recalc.run} · сдвиг ветра ${sgn(o.recalc.shift)} м/с`, why: 'Проверяю, не обновилась ли погода.'});
+    st.push({tool: 'recalc_forecast', stages: ['recalc', 'model', 'forecast'], detail: `сдвиг больше порога 0,5 м/с → пересчёт, версия v${o.ver}`, why: 'Новая погода заметно другая — пересчитываю.'});
+  } else {
+    st.push({tool: 'fetch_weather', arg: 'run="latest"', stages: ['recalc'], skip: true, detail: 'более свежих прогонов нет — пересчёт не нужен', why: 'Проверяю, не обновилась ли погода.'});
+  }
+  st.push({tool: 'publish_forecast', action: true, stages: [], detail: `v${o.ver} · ${o.file} · 144 строки`, why: 'Публикую выпуск и сводку для диспетчера.'});
+  return st;
+}
+function febTraceCtx(i){
+  const d = feb[i], cur = d.vs.at(-1), v1 = d.vs[0];
+  return {run1: runLabel(i, 1), run2: `${dm(issueDate(i - 1))} 12:00 UTC`, moment: moment(i), flags: cur.flags, times: timesFor(i),
+    recalc: d.vs.length > 1 ? {run: runLabel(i, cur.v), shift: -v1.shift} : null, ver: cur.v, file: `2026-${pad(issueDate(i).getUTCMonth() + 1)}-${pad(issueDate(i).getUTCDate())}.csv`};
+}
+
+/* ---------- agent panel ---------- */
+const STAGES = [['weather', 'погода'], ['prep', 'подготовка'], ['model', 'модель'], ['forecast', 'прогноз'], ['analysis', 'анализ'], ['recalc', 'пересчёт']];
+function stepHTML(s, n, state, fresh){
+  const ic = state === 'run' ? '<i class="spin"></i>' : s.skip ? '—' : s.warn ? '⚠' : '✓';
+  return `<li class="st ${state}${s.skip ? ' skip' : ''}${s.warn ? ' warn' : ''}${fresh ? ' new' : ''}"><span class="no">${n}</span><div>
+    <div class="tl"><code>${s.tool}${s.arg ? '(' + s.arg + ')' : ''}</code>${s.action ? '<span class="act">действие</span>' : ''}<span class="ic">${ic}</span></div>
+    <div class="dt">${s.detail}</div><div class="why">агент: ${s.why}</div></div></li>`;
+}
+function renderStepper(el, steps, runIdx = -1){
+  const state = {};
+  steps.forEach((s, k) => { if (k > runIdx && runIdx >= 0) return; s.stages.forEach(g => { if (k === runIdx) state[g] = 'run'; else if (state[g] !== 'done') state[g] = s.skip ? 'skip' : 'done'; }); });
+  el.innerHTML = STAGES.map(([k, l]) => `<span class="stg ${state[k] || ''}"><i></i>${l}${state[k] === 'skip' ? ' · не нужен' : ''}</span>`).join('');
+}
+function renderTrace(listEl, stepEl, steps){ listEl.innerHTML = steps.map((s, k) => stepHTML(s, k + 1, 'done')).join(''); renderStepper(stepEl, steps); }
+async function animateTrace(listEl, stepEl, steps, hooks = {}){
+  listEl.innerHTML = ''; renderStepper(stepEl, steps.slice(0, 0));
+  for (let k = 0; k < steps.length; k++){
+    listEl.insertAdjacentHTML('beforeend', stepHTML(steps[k], k + 1, 'run', true));
+    renderStepper(stepEl, steps.slice(0, k + 1), k);
+    listEl.lastElementChild.scrollIntoView({block: 'nearest'});
+    await sleep(steps[k].model ? 900 : 650);
+    listEl.lastElementChild.outerHTML = stepHTML(steps[k], k + 1, 'done');
+    if (hooks.after) hooks.after(steps[k], k);
+  }
+  renderStepper(stepEl, steps);
+}
+
+/* ---------- chart ---------- */
+function drawChart(el, data){
+  const W = Math.max(320, el.clientWidth || 700), CH = 250, WH = 74, m = {l: 44, r: 12, t: 22, b: 24};
+  const n = data.p50.length, iw = W - m.l - m.r, ih = CH - m.t - m.b;
+  const x = i => m.l + (i / (n - 1)) * iw, y = v => m.t + (1 - v) * ih;
+  let s = `<svg viewBox="0 0 ${W} ${CH + WH + 8}" role="img" aria-label="Прогноз выработки на 48 часов">`;
+  (data.flags || []).forEach(f => {
+    const x0 = x(Math.max(0, f.from - .5)), x1 = x(Math.min(n - 1, f.to + .5));
+    s += `<rect x="${x0}" y="${m.t}" width="${Math.max(3, x1 - x0)}" height="${ih}" fill="${f.kind === 'ramp' ? 'rgba(240,180,90,.10)' : 'rgba(169,221,245,.08)'}"/>`;
+    s += `<text x="${(x0 + x1) / 2}" y="${m.t - 7}" text-anchor="middle" style="fill:${f.kind === 'ramp' ? '#F0B45A' : '#A9DDF5'}; font-size:12px">${f.kind === 'ramp' ? (f.down ? '↘' : '↗') : '❄'}</text>`;
+  });
+  [0, .25, .5, .75, 1].forEach(g => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(g)}" y2="${y(g)}" stroke="#1E2C35" stroke-width="1"/><text x="${m.l - 7}" y="${y(g) + 4}" text-anchor="end">${g * 100}%</text>`; });
+  data.times.forEach((t, i) => {
+    const hh = t.getUTCHours();
+    if (hh === 0 || i === 0){ if (i > 0) s += `<line x1="${x(i)}" x2="${x(i)}" y1="${m.t}" y2="${CH - m.b + 4}" stroke="#2F4553" stroke-dasharray="3 3"/>`; s += `<text class="dl" x="${x(i) + 4}" y="${m.t + 12}">${dm(t)}</text>`; }
+    if (hh % 6 === 0) s += `<text x="${x(i)}" y="${CH - 6}" text-anchor="middle">${pad(hh)}</text>`;
+  });
+  s += `<line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${CH - m.b}" stroke="#7CC4FF" stroke-width="1.5"/>`;
+  const band = data.p90.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('') + data.p10.map((v, i) => [i, v]).reverse().map(([i, v]) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('') + 'Z';
+  s += `<path d="${band}" fill="rgba(124,196,255,.20)"/>`;
+  if (data.prev) s += `<path d="${data.prev.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="#8B9CA5" stroke-width="1.6" stroke-dasharray="5 4"/>`;
+  s += `<path d="${data.p50.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="#7CC4FF" stroke-width="2.4" stroke-linejoin="round"/>`;
+  if (data.fact) s += `<path d="${data.fact.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="#E4ECEF" stroke-width="1.4"/>`;
+  if (data.wind){
+    const y0 = CH + 8, wy = w => y0 + WH - 16 - (w / 20) * (WH - 26), bw = Math.max(2, iw / n - 2);
+    s += `<text x="${m.l - 7}" y="${y0 + 10}" text-anchor="end">м/с</text>`;
+    data.wind.forEach((w, i) => { s += `<rect x="${x(i) - bw / 2}" y="${wy(w)}" width="${bw}" height="${y0 + WH - 16 - wy(w)}" fill="${w >= 11.5 ? '#56707F' : '#34495A'}" rx="1"/>`; });
+    [[3, 'пуск 3'], [11.5, 'номинал 11,5']].forEach(([w, l]) => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${wy(w)}" y2="${wy(w)}" stroke="#2F4553" stroke-dasharray="2 3"/><text x="${W - m.r}" y="${wy(w) - 3}" text-anchor="end">${l}</text>`; });
+    s += `<text x="${m.l}" y="${y0 + WH - 2}">ветер на высоте ступицы, прогноз</text>`;
+  }
+  s += `<line id="hv" x1="0" x2="0" y1="${m.t}" y2="${CH - m.b}" stroke="#E4ECEF" stroke-opacity=".35" visibility="hidden"/>`;
+  s += `<rect x="${m.l}" y="${m.t}" width="${iw}" height="${CH - m.t}" fill="transparent" style="cursor:crosshair"/></svg><div class="tip" hidden></div>`;
+  el.innerHTML = s;
+  const svg = el.querySelector('svg'), tip = el.querySelector('.tip'), hv = el.querySelector('#hv');
+  svg.addEventListener('mousemove', e => {
+    const b = svg.getBoundingClientRect(), k = W / b.width, mx = (e.clientX - b.left) * k;
+    const i = clamp(Math.round((mx - m.l) / iw * (n - 1)), 0, n - 1);
+    hv.setAttribute('x1', x(i)); hv.setAttribute('x2', x(i)); hv.setAttribute('visibility', 'visible');
+    tip.hidden = false; tip.style.left = (x(i) / k) + 'px'; tip.style.top = (y(data.p90[i]) / k - 8) + 'px';
+    tip.innerHTML = `${hm(data.times[i])} · h${i + 1}<br><b>P50 ${pct(data.p50[i])}</b> · P10–P90 ${pct(data.p10[i])}–${pct(data.p90[i])}${data.wind ? `<br>ветер ${f1(data.wind[i])} м/с` : ''}${data.fact ? `<br>факт ${pct(data.fact[i])}` : ''}`;
+  });
+  svg.addEventListener('mouseleave', () => { tip.hidden = true; hv.setAttribute('visibility', 'hidden'); });
+}
+function legendHTML(flags, times, hasPrev, prevV){
+  let h = `<span class="lg-i"><span class="sw-l"></span>P50</span><span class="lg-i"><span class="sw-b"></span>коридор P10–P90</span>`;
+  if (hasPrev) h += `<span class="lg-i"><span class="sw-v"></span>v${prevV} до пересчёта</span>`;
+  h += flags.length ? flags.map(f => `<span class="fl ${f.kind}">${flagLabel(f, times)}</span>`).join('') : '<span class="fl none">✓ рисков нет</span>';
+  return h;
+}
+
+/* ---------- February render ---------- */
+function renderCells(){
+  $('#cells').innerHTML = feb.map((d, i) => {
+    const c = d.vs.at(-1), dt = issueDate(i);
+    return `<button class="cell${i === sel ? ' on' : ''}${i > played ? ' fut' : ''}" data-i="${i}" aria-label="Выпуск ${dm(dt)}" aria-pressed="${i === sel}">
+      <span class="dn">${dt.getUTCDate()}</span>${i < 2 ? `<span class="mo">${i ? 'фев' : 'янв'}</span>` : ''}${c.flags.length ? '<span class="fd"></span>' : ''}${d.vs.length > 1 ? `<span class="vb">v${d.vs.length}</span>` : ''}
+      <span class="bar" style="height:${Math.round(4 + avg(c.s.p50) * 40)}px"></span></button>`;
+  }).join('');
+}
+function renderProv(){
+  const i = sel, d = feb[i], c = d.vs.at(-1), t = timesFor(i);
+  let rows = `<tr><td>Часы 1–24 · ${dm(t[0])}</td><td>ECMWF IFS · прогон ${runLabel(i, c.v)}</td><td>вышел до ${moment(i)} ✓</td></tr>
+    <tr><td>Часы 25–48 · ${dm(t[24])}</td><td>ECMWF IFS · прогон ${dm(issueDate(i - 1))} 12:00 UTC</td><td>вышел до ${moment(i)} ✓</td></tr>`;
+  if (d.vs.length > 1) rows += `<tr><td>До пересчёта (v${d.vs.length - 1})</td><td>ECMWF IFS · прогон ${runLabel(i, d.vs.at(-2).v)}</td><td>вышел до ${moment(i)} ✓</td></tr>`;
+  rows += `<tr><td>Фактическая выработка</td><td>в прогнозе не используется</td><td>—</td></tr>`;
+  $('#prov').innerHTML = `<table>${rows}</table><div class="foot">Момент выпуска: ${dm(issueDate(i))} 24:00 по Астане = ${moment(i)}. scripts/verify.py проверяет это правило для всех 29 выпусков.</div>`;
+}
+function renderFeb(){
+  const i = sel, d = feb[i], c = d.vs.at(-1), t = timesFor(i), dt = issueDate(i);
+  const clk = `${dm(dt)}.2026 24:00`;
+  $('#feb-clock').textContent = clk; $('#feb-clock2').textContent = clk;
+  $('#feb-title').innerHTML = `Выпуск ${dm(dt)}<small>прогноз на ${dm(t[0])}–${dm(t[24])} · 48 часов · нормированная мощность, 100 % = номинал</small>`;
+  $('#feb-ver').textContent = d.vs.length > 1 ? `v${c.v} · пересчитан` : 'v1';
+  const vw = view(c.s, febTurb), prev = d.vs.length > 1 ? view(d.vs.at(-2).s, febTurb).p50 : null;
+  drawChart($('#feb-chart'), {...vw, prev, wind: c.s.wind, flags: c.flags, times: t});
+  $('#feb-flags').innerHTML = legendHTML(c.flags, t, !!prev, d.vs.length > 1 ? d.vs.at(-2).v : 0);
+  $('#feb-sum').textContent = '«' + summaryOf({p50: vw.p50}, t, c.flags) + '»';
+  renderProv(); renderCells();
+}
+function renderFebTrace(){ renderTrace($('#feb-trace'), $('#feb-stepper'), fullTrace(febTraceCtx(sel))); }
+
+/* ---------- Live ---------- */
+const nowL = () => new Date(Date.now() + 5 * H);
+const fmtL = d => { const l = new Date(d.getTime() + 5 * H); return `${pad(l.getUTCHours())}:${pad(l.getUTCMinutes())}`; };
+const fmtU = d => `${dm(d)} ${pad(d.getUTCHours())}:00 UTC`;
+function ecmwf(){ const avail = 6.67 * H, six = 6 * H, last = Math.floor((Date.now() - avail) / six) * six; return {last: new Date(last), prev: new Date(last - six), next: new Date(last + six), nextAvail: new Date(last + six + avail)}; }
+function liveTimes(){ const n = nowL(); const st = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), n.getUTCHours() + 1); return Array.from({length: 48}, (_, h) => new Date(st + h * H)); }
+const live = {vs: []};
+function liveInit(){
+  const e = ecmwf(), t = liveTimes(), seed = Math.floor(Date.now() / (6 * H));
+  const sh = t[0].getUTCHours();
+  live.times = t; live.seed = seed; live.issued = fmtL(new Date(Date.now() - 95 * 60e3));
+  const s = genSeries(seed, .8, 48, sh);
+  live.vs = [{v: 1, run: fmtU(e.prev), s, flags: flagsOf(s, sh)}];
+}
+function renderLiveHead(){
+  const e = ecmwf(), n = nowL();
+  $('#live-now').textContent = `${dm(n)}.${n.getUTCFullYear()} ${pad(n.getUTCHours())}:${pad(n.getUTCMinutes())}`;
+  $('#live-last').textContent = fmtU(e.last);
+  $('#live-next').textContent = `${pad(e.next.getUTCHours())}:00 UTC → ≈ ${fmtL(e.nextAvail)}`;
+}
+function renderLive(){
+  const c = live.vs.at(-1), t = live.times;
+  $('#live-sub').textContent = `${hm(t[0])} → ${hm(t[47])} · выпущен в ${live.issued} на прогоне ${c.run}`;
+  $('#live-ver').textContent = live.vs.length > 1 ? `v${c.v} · пересчитан` : `v${c.v}`;
+  const vw = view(c.s, liveTurb), prev = live.vs.length > 1 ? view(live.vs.at(-2).s, liveTurb).p50 : null;
+  drawChart($('#live-chart'), {...vw, prev, wind: c.s.wind, flags: c.flags, times: t});
+  $('#live-flags').innerHTML = legendHTML(c.flags, t, !!prev, live.vs.length > 1 ? live.vs.at(-2).v : 0);
+  $('#live-sum').textContent = '«' + summaryOf({p50: vw.p50}, t, c.flags) + '»';
+}
+function liveTraceCtx(){
+  const c = live.vs.at(-1), e = ecmwf();
+  return {run1: live.vs[0].run, run2: fmtU(new Date(e.prev.getTime() - 6 * H)), moment: `${fmtL(new Date())} по Астане`, flags: c.flags, times: live.times,
+    recalc: live.vs.length > 1 ? {run: c.run, shift: live.shift || .8} : null, ver: c.v, file: 'outputs/live/latest.csv'};
+}
+
+/* ---------- Quality ---------- */
+function drawHorizon(el){
+  const W = Math.max(300, el.clientWidth || 500), HH = 200, m = {l: 40, r: 12, t: 12, b: 26}, iw = W - m.l - m.r, ih = HH - m.t - m.b;
+  const x = h => m.l + (h - 1) / 47 * iw, y = v => m.t + (1 - v / 20) * ih;
+  const mod = Array.from({length: 48}, (_, k) => 9.4 + 4.6 * Math.pow(k / 47, .9) + Math.sin(k / 3) * .25);
+  const pc = Array.from({length: 48}, (_, k) => 12.1 + 5.4 * Math.pow(k / 47, .85) + Math.sin(k / 3 + 1) * .3);
+  let s = `<svg viewBox="0 0 ${W} ${HH}" role="img" aria-label="Ошибка по горизонту">`;
+  [0, 5, 10, 15, 20].forEach(g => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(g)}" y2="${y(g)}" stroke="#1E2C35"/><text x="${m.l - 6}" y="${y(g) + 4}" text-anchor="end">${g}%</text>`; });
+  [1, 12, 24, 36, 48].forEach(h => { s += `<text x="${x(h)}" y="${HH - 8}" text-anchor="middle">h${h}</text>`; });
+  s += `<line x1="${x(24.5)}" x2="${x(24.5)}" y1="${m.t}" y2="${HH - m.b}" stroke="#2F4553" stroke-dasharray="3 3"/>`;
+  s += `<path d="${pc.map((v, k) => `${k ? 'L' : 'M'}${x(k + 1).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="#5E717B" stroke-width="2"/>`;
+  s += `<path d="${mod.map((v, k) => `${k ? 'L' : 'M'}${x(k + 1).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="#7CC4FF" stroke-width="2.4"/>`;
+  s += `<text x="${x(48) - 2}" y="${y(pc[47]) - 7}" text-anchor="end">кривая мощности</text><text x="${x(48) - 2}" y="${y(mod[47]) + 15}" text-anchor="end" style="fill:#7CC4FF">модель</text></svg>`;
+  el.innerHTML = s;
+}
+function drawWeek(el){
+  const n = 168, s = genSeries(777, 0, n), r = rng(99);
+  let e = 0; const fact = s.p50.map((v, h) => { e = e * .8 + (r() - .5) * .12; return clamp(v + e, 0, 1); });
+  const t = Array.from({length: n}, (_, h) => new Date(Date.UTC(2026, 0, 15) + h * H));
+  drawChart(el, {p10: s.p10, p50: s.p50, p90: s.p90, fact, times: t, flags: []});
+}
+
+/* ---------- UI plumbing ---------- */
+const toastEl = $('#toast'); let tt;
+function toast(m){ toastEl.textContent = m; toastEl.hidden = false; clearTimeout(tt); tt = setTimeout(() => toastEl.hidden = true, 3200); }
+function lock(on){ document.querySelectorAll('#btn-reissue,#btn-newrun,#btn-live-issue,#btn-live-check').forEach(b => b.disabled = on); $('#btn-play').disabled = on && !playing; busy = on; }
+let tab = 'feb';
+function setTab(t){
+  tab = t;
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+  $('#tab-feb').hidden = t !== 'feb'; $('#tab-live').hidden = t !== 'live'; $('#tab-q').hidden = t !== 'q';
+  $('#tab-live').style.display = t === 'live' ? 'grid' : '';
+  if (t === 'feb') renderFeb();
+  if (t === 'live'){ renderLiveHead(); renderLive(); }
+  if (t === 'q'){ drawHorizon($('#q-h')); drawWeek($('#q-week')); }
+}
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
+$('#cells').addEventListener('click', e => { const c = e.target.closest('.cell'); if (!c || busy) return; sel = +c.dataset.i; renderFeb(); renderFebTrace(); });
+function seg(id, set){ $(id).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $(id).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); set(b.dataset.t); }); }
+seg('#feb-seg', t => { febTurb = t; renderFeb(); });
+seg('#live-seg', t => { liveTurb = t; renderLive(); });
+$('#btn-honest').addEventListener('click', () => { const p = $('#prov'); p.hidden = !p.hidden; $('#btn-honest').setAttribute('aria-expanded', String(!p.hidden)); });
+
+$('#btn-play').addEventListener('click', async () => {
+  if (playing){ playing = false; return; }
+  if (busy) return;
+  playing = true; lock(true); $('#btn-play').textContent = '■ Стоп'; played = -1; renderCells();
+  for (let i = 0; i < DAYS && playing; i++){ played = i; sel = i; renderFeb(); renderFebTrace(); $('#cells').children[i].scrollIntoView({block: 'nearest', inline: 'nearest'}); await sleep(420); }
+  const done = played >= DAYS - 1; played = DAYS; playing = false; lock(false); $('#btn-play').textContent = '▶ Воспроизвести февраль'; renderFeb();
+  toast(done ? '29 выпусков воспроизведены из записи прогона агента' : 'Воспроизведение остановлено');
+});
+$('#btn-reissue').addEventListener('click', async () => {
+  if (busy) return; lock(true);
+  const w = $('#feb-chart'); w.classList.add('pending');
+  await animateTrace($('#feb-trace'), $('#feb-stepper'), fullTrace(febTraceCtx(sel)), {after: s => { if (s.model) w.classList.remove('pending'); }});
+  w.classList.remove('pending'); lock(false);
+  toast('Перевыпуск совпал с сохранённым до знака — прогноз воспроизводим ✓');
+});
+$('#btn-newrun').addEventListener('click', async () => {
+  if (busy) return; lock(true);
+  const d = feb[sel], cur = d.vs.at(-1), i = sel;
+  if (cur.v >= 3){
+    await animateTrace($('#feb-trace'), $('#feb-stepper'), [
+      {tool: 'fetch_weather', arg: 'run="latest"', stages: ['weather'], detail: `следующий прогон ${dm(issueDate(i))} 18:00 UTC вышел бы после момента выпуска ${moment(i)}`, why: 'Проверяю, есть ли прогон свежее.'},
+      {tool: 'решение', stages: ['recalc'], skip: true, detail: `пересчёт запрещён правилом «без будущего» — v${cur.v} остаётся`, why: 'Взять этот прогон — значит подглядеть в будущее.'}]);
+    lock(false); toast('Агент отказался: более свежий прогон был бы из будущего'); return;
+  }
+  const shift = d.recShift, nv = cur.v + 1, s = genSeries(100 + i, cur.shift + shift);
+  const nx = {v: nv, shift: cur.shift + shift, s, flags: flagsOf(s)};
+  const pk = Math.round((Math.max(...s.p50) - Math.max(...cur.s.p50)) * 100);
+  const steps = [
+    {tool: 'fetch_weather', arg: 'run="latest"', stages: ['weather'], detail: `вышел прогон ${runLabel(i, nv)} · до момента выпуска ✓`, why: 'Пришло событие: новый прогон погоды.'},
+    {tool: 'check_data', stages: ['prep'], detail: `сравниваю с прогоном ${runLabel(i, cur.v)}: средний сдвиг ветра ${sgn(shift)} м/с`, why: 'Смотрю, насколько изменилась погода.'},
+    {tool: 'recalc_forecast', stages: ['recalc', 'model', 'forecast'], detail: `сдвиг больше порога 0,5 м/с → пересчёт, версия v${nv}`, why: 'Разница существенная — пересчитываю.', model: true},
+    {tool: 'analyze_forecast', stages: ['analysis'], detail: `${flagText(nx.flags, timesFor(i))} · пик ${pk >= 0 ? '+' : '−'}${Math.abs(pk)} п.п. против v${cur.v}`, why: 'Проверяю новый прогноз и что изменилось.', warn: nx.flags.length > 0},
+    {tool: 'publish_forecast', action: true, stages: [], detail: `v${nv} · «ветер ${sgn(shift)} м/с → пик ${pk >= 0 ? '+' : '−'}${Math.abs(pk)} п.п.»`, why: `Публикую v${nv} с объяснением, v${cur.v} оставляю для сравнения.`}];
+  await animateTrace($('#feb-trace'), $('#feb-stepper'), steps, {after: st => { if (st.model){ d.vs.push(nx); renderFeb(); } }});
+  lock(false); toast(`Агент пересчитал: v${nv} опубликована, v${cur.v} — пунктиром`);
+});
+$('#btn-live-issue').addEventListener('click', async () => {
+  if (busy) return; lock(true);
+  const e = ecmwf(), t = liveTimes(), sh = t[0].getUTCHours(), s = genSeries(live.seed, 0, 48, sh);
+  live.times = t; live.issued = fmtL(new Date()); live.vs = [{v: 1, run: fmtU(e.last), s, flags: flagsOf(s, sh)}];
+  const w = $('#live-chart'); w.classList.add('pending');
+  await animateTrace($('#live-trace'), $('#live-stepper'), fullTrace(liveTraceCtx()), {after: st => { if (st.model){ renderLive(); w.classList.remove('pending'); } }});
+  w.classList.remove('pending'); lock(false); renderLive(); toast('Прогноз от текущего момента опубликован');
+});
+$('#btn-live-check').addEventListener('click', async () => {
+  if (busy) return; lock(true);
+  const e = ecmwf(), cur = live.vs.at(-1);
+  if (cur.run === fmtU(e.last)){
+    await animateTrace($('#live-trace'), $('#live-stepper'), [
+      {tool: 'fetch_weather', arg: 'run="latest"', stages: ['weather'], detail: `последний прогон ${fmtU(e.last)} уже учтён`, why: 'Проверяю, не вышел ли новый прогон.'},
+      {tool: 'решение', stages: ['recalc'], skip: true, detail: `пересчёт не нужен · следующий прогон ≈ ${fmtL(e.nextAvail)} — проверю сам`, why: 'Новых данных нет.'}]);
+    lock(false); return;
+  }
+  const sh = live.times[0].getUTCHours(), shift = -.8, s = genSeries(live.seed, 0, 48, sh), nv = cur.v + 1;
+  live.shift = shift;
+  const nx = {v: nv, run: fmtU(e.last), s, flags: flagsOf(s, sh)};
+  const steps = [
+    {tool: 'fetch_weather', arg: 'run="latest"', stages: ['weather'], detail: `вышел прогон ${fmtU(e.last)}`, why: 'Проверяю, не вышел ли новый прогон.'},
+    {tool: 'check_data', stages: ['prep'], detail: `сравниваю с ${cur.run}: средний сдвиг ветра ${sgn(shift)} м/с`, why: 'Смотрю, насколько изменилась погода.'},
+    {tool: 'recalc_forecast', stages: ['recalc', 'model', 'forecast'], detail: `сдвиг больше порога 0,5 м/с → версия v${nv}`, why: 'Разница существенная — пересчитываю.', model: true},
+    {tool: 'analyze_forecast', stages: ['analysis'], detail: flagText(nx.flags, live.times), why: 'Проверяю новый прогноз.', warn: nx.flags.length > 0},
+    {tool: 'publish_forecast', action: true, stages: [], detail: `v${nv} · outputs/live/latest.csv`, why: `Публикую v${nv}, v${cur.v} оставляю для сравнения.`}];
+  await animateTrace($('#live-trace'), $('#live-stepper'), steps, {after: st => { if (st.model){ live.vs.push(nx); renderLive(); } }});
+  lock(false); toast(`Нашёлся свежий прогон — агент выпустил v${nv}`);
+});
+['#btn-csv', '#btn-csv-all', '#btn-live-csv'].forEach(id => $(id).addEventListener('click', () => toast('В макете файл не скачивается. В продукте: GET /api/forecasts/{D}.csv')));
+
+const drawer = $('#drawer'), scrim = $('#scrim');
+const openD = () => { drawer.hidden = false; scrim.hidden = false; $('#close-tester').focus(); };
+const closeD = () => { drawer.hidden = true; scrim.hidden = true; };
+$('#open-tester').addEventListener('click', openD); $('#close-tester').addEventListener('click', closeD); scrim.addEventListener('click', closeD);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !drawer.hidden) closeD(); });
+function flash(el){ el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); el.scrollIntoView({behavior: RM ? 'auto' : 'smooth', block: 'center'}); setTimeout(() => el.classList.remove('pulse'), 2600); }
+drawer.addEventListener('click', e => {
+  const b = e.target.closest('[data-go]'); if (!b) return; closeD();
+  const g = b.dataset.go;
+  if (g === 'live' || g === 'q'){ setTab(g); flash(g === 'live' ? $('#btn-live-issue') : $('#tab-q .tiles')); return; }
+  setTab('feb');
+  if (g === 'cal') flash($('#calcard'));
+  if (g === 'honest'){ $('#prov').hidden = false; $('#btn-honest').setAttribute('aria-expanded', 'true'); flash($('#prov')); }
+  if (g === 'stepper') flash($('#feb-stepper'));
+  if (g === 'newrun') flash($('#btn-newrun'));
+  if (g === 'chart') flash($('#feb-chart'));
+});
+
+/* ---------- boot ---------- */
+liveInit();
+renderFeb(); renderFebTrace();
+renderTrace($('#live-trace'), $('#live-stepper'), fullTrace(liveTraceCtx()));
+setInterval(() => { if (tab === 'live') renderLiveHead(); }, 30000);
+let rt, lastW = 0; const ro = new ResizeObserver(en => { const w = Math.round(en[0].contentRect.width); if (w === lastW) return; lastW = w; clearTimeout(rt); rt = setTimeout(() => { if (tab === 'feb') renderFeb(); if (tab === 'live') renderLive(); if (tab === 'q'){ drawHorizon($('#q-h')); drawWeek($('#q-week')); } }, 120); });
+ro.observe(document.querySelector('main'));
+})();
+</script>
+
+</body></html>

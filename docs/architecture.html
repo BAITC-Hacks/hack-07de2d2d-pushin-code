@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0">
+<title>Архитектура Windcast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#F1F4F3; --paper:#FFFFFF; --ink:#14201D; --muted:#5A6865; --line:#C5CFCC; --soft:#E7EDEB;
+  --front:#3350C4; --front-bg:#EAEEFC;
+  --back:#0D6F60;  --back-bg:#E0F0EB;
+  --ext:#9C5F0A;   --ext-bg:#FAEEDB;
+  --infra:#4E5A66; --infra-bg:#E7EBEF;
+  --warn:#9C5F0A;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0E1513; --paper:#151F1C; --ink:#E3EBE8; --muted:#93A39F; --line:#34443F; --soft:#1D2926;
+    --front:#98AAFF; --front-bg:#1B2349;
+    --back:#52C8B0;  --back-bg:#0F2F28;
+    --ext:#E6AC55;   --ext-bg:#36280F;
+    --infra:#B2BDC8; --infra-bg:#222B32;
+    --warn:#E6AC55;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0E1513; --paper:#151F1C; --ink:#E3EBE8; --muted:#93A39F; --line:#34443F; --soft:#1D2926;
+  --front:#98AAFF; --front-bg:#1B2349;
+  --back:#52C8B0;  --back-bg:#0F2F28;
+  --ext:#E6AC55;   --ext-bg:#36280F;
+  --infra:#B2BDC8; --infra-bg:#222B32;
+  --warn:#E6AC55;
+}
+
+body{background:var(--ground); color:var(--ink); font:15px/1.55 var(--sans)}
+.wrap{max-width:1100px; margin:0 auto; padding-inline:clamp(16px,4vw,40px); padding-block:36px 72px; display:grid; gap:44px}
+
+header{display:grid; gap:14px}
+.eyebrow{font:500 12px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+h1{font-size:clamp(28px,4.2vw,40px); line-height:1.1; margin:0; font-weight:700; letter-spacing:-.01em; text-wrap:balance}
+h2{font-size:22px; line-height:1.25; margin:0; font-weight:650; text-wrap:balance}
+h3{font-size:16px; margin:0; font-weight:600}
+p{margin:0; max-width:68ch}
+.lead{font-size:17px; color:var(--ink)}
+.lead b{font-weight:600}
+.status{display:inline-flex; align-items:center; gap:8px; width:max-content; max-width:100%;
+  font:500 12.5px/1 var(--mono); padding:7px 11px; border-radius:999px; border:1px solid var(--warn); color:var(--warn)}
+.status::before{content:""; width:7px; height:7px; border-radius:50%; background:var(--warn)}
+
+.legend{display:flex; flex-wrap:wrap; gap:8px 10px; padding:0; margin:0; list-style:none}
+.legend li{display:flex; align-items:center; gap:8px; font-size:13.5px; padding:6px 11px 6px 9px; border-radius:8px; border:1px solid var(--line); background:var(--paper)}
+.sw{width:12px; height:12px; border-radius:3px; border:1.5px solid; flex:none}
+.sw.front{background:var(--front-bg); border-color:var(--front)}
+.sw.back{background:var(--back-bg); border-color:var(--back)}
+.sw.infra{background:var(--infra-bg); border-color:var(--infra)}
+.sw.ext{background:var(--ext-bg); border-color:var(--ext)}
+.sw.file{background:var(--paper); border-color:var(--back); border-style:dashed}
+
+section{display:grid; gap:14px}
+.cap{color:var(--muted); font-size:14.5px}
+.sheet{background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:18px; overflow-x:auto}
+.sheet svg{display:block; width:100%; min-width:860px; height:auto}
+
+code{font:500 13px/1.4 var(--mono); background:var(--soft); padding:1px 5px; border-radius:4px; white-space:nowrap}
+
+/* SVG diagrams */
+.d text{font-family:var(--sans); fill:var(--ink); font-size:14px}
+.d .t{font-weight:600; font-size:15px}
+.d .s{fill:var(--muted); font-size:12.5px}
+.d .m{font-family:var(--mono); font-size:13px}
+.d .o{font-size:10.5px; font-weight:600; letter-spacing:.09em; fill:var(--muted)}
+.d .lbl{font-size:12.5px}
+.d .n{font-weight:700; fill:var(--back)}
+.d .halo{paint-order:stroke; stroke:var(--paper); stroke-width:5px; stroke-linejoin:round}
+.d rect{stroke-width:1.5}
+.b-neutral rect{fill:var(--paper); stroke:var(--line)}
+.b-front rect{fill:var(--front-bg); stroke:var(--front)}   .b-front .o{fill:var(--front)}
+.b-back rect{fill:var(--back-bg); stroke:var(--back)}      .b-back .o{fill:var(--back)}
+.b-ext rect{fill:var(--ext-bg); stroke:var(--ext)}         .b-ext .o{fill:var(--ext)}
+.b-infra rect{fill:var(--infra-bg); stroke:var(--infra)}   .b-infra .o{fill:var(--infra)}
+.b-file rect{fill:var(--paper); stroke:var(--back); stroke-dasharray:5 4}
+.b-tool rect{fill:var(--paper); stroke:var(--back)}
+.b-dash rect{fill:var(--paper); stroke:var(--muted); stroke-dasharray:5 4}
+.d .frame{fill:none; stroke:var(--line); stroke-dasharray:7 5; stroke-width:1.5}
+.d .frame.back{stroke:var(--back)}
+.d .tag{font-size:11px; font-weight:600; fill:var(--back); letter-spacing:.04em}
+.ln{stroke:var(--ink); stroke-width:1.5; fill:none}
+.ln.ret{stroke:var(--muted); stroke-dasharray:5 4}
+.ln.dot{stroke:var(--line); stroke-dasharray:2 4}
+.life{stroke:var(--line); stroke-dasharray:3 5; stroke-width:1.2}
+.ahd{fill:var(--ink)} .ahm{fill:var(--muted)}
+.loop .fr{fill:none; stroke:var(--back); stroke-width:1.5}
+.loop .tab{fill:var(--back-bg); stroke:var(--back)}
+.d .lp{fill:var(--back)}
+
+/* pipelines */
+.pipe{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:30px; list-style:none; padding:0; margin:0}
+.pipe li{position:relative; background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:14px 14px 15px; display:grid; gap:6px; align-content:start}
+.pipe li:not(:last-child)::after{content:"→"; position:absolute; right:-23px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:18px}
+.pipe .k{font:600 10.5px/1 var(--sans); letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
+.pipe b{font-weight:600; font-size:14.5px; line-height:1.35}
+.pipe code{white-space:normal; word-break:break-word; width:max-content; max-width:100%}
+.pipe .pass{border-color:var(--back); background:var(--back-bg)}
+
+.when{display:grid; gap:26px}
+.when > div{display:grid; gap:12px}
+.when h3 span{font:600 12px/1 var(--mono); color:var(--back); margin-right:8px}
+
+.steps{margin:0; padding-left:22px; display:grid; gap:6px; max-width:78ch}
+.steps li::marker{font-weight:600; color:var(--back)}
+
+.tbl{overflow-x:auto; background:var(--paper); border:1px solid var(--line); border-radius:14px}
+table{border-collapse:collapse; width:100%; min-width:640px; font-size:14px}
+th,td{text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+th{font:600 11px/1.3 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); background:var(--soft)}
+tr:last-child td{border-bottom:0}
+td:first-child{white-space:nowrap}
+td:first-child code{background:transparent; padding:0}
+
+footer{color:var(--muted); font-size:13.5px; border-top:1px solid var(--line); padding-top:18px; display:grid; gap:6px}
+
+@media (max-width:760px){
+  .pipe{grid-template-columns:1fr; gap:28px}
+  .pipe li:not(:last-child)::after{content:"↓"; right:auto; left:50%; top:auto; bottom:-25px; transform:translateX(-50%)}
+}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="ahd" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="ahm" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Pushin' Code · HackAlem AI · 23.09.2026 · прогноз выработки ВЭС</div>
+  <h1>Архитектура Windcast</h1>
+  <p class="lead">Числа прогноза считает <b>модель</b>, порядок шагов и решения — <b>агент</b>. Ниже: где что работает, что внутри бэкенда, в каком порядке всё происходит и через какие запросы фронтенд говорит с бэкендом.</p>
+  <div class="status">Черновик v0 — не финал</div>
+  <ul class="legend" aria-label="Кто за что отвечает">
+    <li><span class="sw front"></span>Сула — экран</li>
+    <li><span class="sw back"></span>Куба — бэкенд, данные, модель</li>
+    <li><span class="sw infra"></span>Абылай — сервер, verify.py, README</li>
+    <li><span class="sw ext"></span>Внешние сервисы</li>
+    <li><span class="sw file"></span>Файлы в репозитории</li>
+  </ul>
+</header>
+
+<section>
+  <h2>Где что работает</h2>
+  <p class="cap">Пользователь приходит на pushin.codes. Caddy отдаёт страницы фронтенда, а всё, что начинается с <code>/api/</code>, передаёт бэкенду. Во внешние сервисы ходит только бэкенд.</p>
+  <div class="sheet">
+    <svg class="d" viewBox="0 0 1000 350" role="img" aria-label="Браузер, Caddy, фронтенд, бэкенд, OpenAI и Open-Meteo">
+      <rect class="frame" x="235" y="20" width="520" height="310" rx="16"/>
+      <text class="o" x="258" y="45">СЕРВЕР 89.126.192.65 · DOCKER COMPOSE</text>
+      <text class="s" x="258" y="316">Контейнеры слушают только 127.0.0.1 — наружу их выводит Caddy</text>
+
+      <g class="b-neutral"><rect x="20" y="135" width="170" height="80" rx="10"/>
+        <text class="t" x="105" y="170" text-anchor="middle">Браузер</text>
+        <text class="s" x="105" y="192" text-anchor="middle">диспетчер · жюри</text></g>
+
+      <g class="b-infra"><rect x="265" y="135" width="160" height="80" rx="10"/>
+        <text class="o" x="345" y="157" text-anchor="middle">АБЫЛАЙ</text>
+        <text class="t" x="345" y="181" text-anchor="middle">Caddy</text>
+        <text class="s" x="345" y="202" text-anchor="middle">HTTPS · pushin.codes</text></g>
+
+      <g class="b-front"><rect x="500" y="48" width="230" height="96" rx="10"/>
+        <text class="o" x="518" y="72">СУЛА</text>
+        <text class="t" x="518" y="98">Frontend · :3100</text>
+        <text class="s" x="518" y="120">Выпуск · Февраль · Качество</text></g>
+
+      <g class="b-back"><rect x="500" y="196" width="230" height="96" rx="10"/>
+        <text class="o" x="518" y="220">КУБА</text>
+        <text class="t" x="518" y="246">Backend · :8100</text>
+        <text class="s" x="518" y="268">FastAPI · агент · модель</text></g>
+
+      <g class="b-ext"><rect x="815" y="150" width="170" height="74" rx="10"/>
+        <text class="o" x="831" y="172">ВНЕШНИЙ СЕРВИС</text>
+        <text class="t" x="831" y="196">OpenAI</text>
+        <text class="s" x="831" y="215">выбирает шаг агента</text></g>
+
+      <g class="b-ext"><rect x="815" y="240" width="170" height="90" rx="10"/>
+        <text class="o" x="831" y="262">ВНЕШНИЙ СЕРВИС</text>
+        <text class="t" x="831" y="286">Open-Meteo</text>
+        <text class="s" x="831" y="304">архивные прогнозы</text>
+        <text class="s m" x="831" y="321" style="font-size:11.5px">43.645, 78.536</text></g>
+
+      <line class="ln" x1="190" y1="175" x2="263" y2="175" marker-end="url(#ah)"/>
+      <text class="lbl m halo" x="227" y="166" text-anchor="middle">https</text>
+      <line class="ln" x1="425" y1="160" x2="498" y2="100" marker-end="url(#ah)"/>
+      <text class="lbl m halo" x="447" y="122" text-anchor="end">/ страницы</text>
+      <line class="ln" x1="425" y1="190" x2="498" y2="244" marker-end="url(#ah)"/>
+      <text class="lbl m halo" x="447" y="242" text-anchor="end">/api/* данные</text>
+      <line class="ln" x1="730" y1="228" x2="813" y2="196" marker-end="url(#ah)"/>
+      <line class="ln" x1="730" y1="262" x2="813" y2="284" marker-end="url(#ah)"/>
+    </svg>
+  </div>
+</section>
+
+<section>
+  <h2>Что внутри бэкенда</h2>
+  <p class="cap">API запускает агента. На каждом шаге агент спрашивает OpenAI, какой инструмент вызвать следующим, и вызывает его. Каждый вызов сразу уходит событием на экран. Без ключа OpenAI агент идёт по тем же шагам по заданным правилам.</p>
+  <div class="sheet">
+    <svg class="d" viewBox="0 0 1000 520" role="img" aria-label="API, агент, OpenAI, шесть инструментов и их источники">
+      <g class="b-back"><rect x="20" y="20" width="960" height="64" rx="10"/>
+        <text class="t" x="40" y="46">API · FastAPI</text>
+        <text class="o" x="960" y="46" text-anchor="end">КУБА</text>
+        <text class="m" x="40" y="70" style="font-size:12.5px">POST /api/runs · GET /api/runs/{id}/events (SSE) · GET /api/forecasts/{D} · GET /api/metrics · GET /health</text></g>
+
+      <line class="ln" x1="155" y1="84" x2="155" y2="138" marker-end="url(#ah)"/>
+      <text class="lbl halo" x="165" y="116">запускает</text>
+
+      <line class="ln" x1="560" y1="118" x2="560" y2="86" marker-end="url(#ah)"/>
+      <text class="s halo" x="572" y="108">каждый шаг → событие SSE на экран</text>
+
+      <g class="b-back"><rect x="20" y="140" width="270" height="100" rx="10"/>
+        <text class="o" x="40" y="162">КУБА</text>
+        <text class="t" x="40" y="188">Агент</text>
+        <text class="s" x="40" y="210">цикл, не больше 8 шагов</text>
+        <text class="s" x="40" y="228">последний шаг — публикация</text></g>
+
+      <line class="ln" x1="84" y1="242" x2="84" y2="298" marker-start="url(#ah)" marker-end="url(#ah)"/>
+      <line class="ln ret" x1="226" y1="242" x2="226" y2="298" marker-end="url(#ahm)"/>
+      <text class="s" x="155" y="274" text-anchor="middle">или</text>
+
+      <g class="b-ext"><rect x="20" y="300" width="128" height="86" rx="10"/>
+        <text class="t" x="84" y="330" text-anchor="middle">OpenAI</text>
+        <text class="s" x="84" y="351" text-anchor="middle">выбирает</text>
+        <text class="s" x="84" y="369" text-anchor="middle">следующий шаг</text></g>
+      <g class="b-dash"><rect x="162" y="300" width="128" height="86" rx="10"/>
+        <text class="t" x="226" y="330" text-anchor="middle">Без ключа</text>
+        <text class="s" x="226" y="351" text-anchor="middle">те же шаги</text>
+        <text class="s" x="226" y="369" text-anchor="middle">по правилам</text></g>
+      <text class="s" x="20" y="420">Числа в обоих режимах одинаковые —</text>
+      <text class="s" x="20" y="438">их считает модель, а не LLM.</text>
+
+      <line class="ln" x1="290" y1="190" x2="358" y2="190" marker-end="url(#ah)"/>
+      <text class="lbl halo" x="324" y="181" text-anchor="middle">вызывает</text>
+
+      <rect class="frame back" x="360" y="120" width="280" height="380" rx="14"/>
+      <text class="o lp" x="378" y="146">6 ИНСТРУМЕНТОВ</text>
+
+      <g class="b-tool"><rect x="378" y="160" width="244" height="44" rx="8"/><text class="m" x="394" y="187" style="font-size:14px">fetch_weather</text></g>
+      <g class="b-tool"><rect x="378" y="216" width="244" height="44" rx="8"/><text class="m" x="394" y="243" style="font-size:14px">check_data</text></g>
+      <g class="b-tool"><rect x="378" y="272" width="244" height="44" rx="8"/><text class="m" x="394" y="299" style="font-size:14px">run_model</text></g>
+      <g class="b-tool"><rect x="378" y="328" width="244" height="44" rx="8"/><text class="m" x="394" y="355" style="font-size:14px">analyze_forecast</text></g>
+      <g class="b-tool"><rect x="378" y="384" width="244" height="44" rx="8"/><text class="m" x="394" y="411" style="font-size:14px">recalc_forecast</text></g>
+      <g class="b-tool"><rect x="378" y="440" width="244" height="44" rx="8"/><text class="m" x="394" y="467" style="font-size:14px">publish_forecast</text>
+        <text class="tag" x="608" y="466" text-anchor="end">ДЕЙСТВИЕ</text></g>
+
+      <line class="ln" x1="622" y1="182" x2="698" y2="182" marker-end="url(#ah)"/>
+      <g class="b-ext"><rect x="700" y="156" width="280" height="52" rx="8"/>
+        <text class="t" x="716" y="178" style="font-size:14.5px">Open-Meteo</text>
+        <text class="s" x="716" y="198">запас без сети: data/weather_cache/</text></g>
+
+      <line class="ln" x1="622" y1="238" x2="698" y2="238" marker-end="url(#ah)"/>
+      <g class="b-file"><rect x="700" y="216" width="280" height="44" rx="8"/>
+        <text class="m" x="716" y="235">data/processed/hourly.parquet</text>
+        <text class="s" x="716" y="252">собирается из data/raw/*.csv</text></g>
+
+      <line class="ln" x1="622" y1="294" x2="698" y2="294" marker-end="url(#ah)"/>
+      <g class="b-file"><rect x="700" y="272" width="280" height="44" rx="8"/>
+        <text class="m" x="716" y="291">models/*.pkl</text>
+        <text class="s" x="716" y="308">P10 · P50 · P90 на каждый час</text></g>
+
+      <line class="ln dot" x1="622" y1="350" x2="706" y2="350"/>
+      <text class="s" x="716" y="346">рампы, обледенение, ветер &gt; 20 м/с,</text>
+      <text class="s" x="716" y="364">расхождение погодных моделей</text>
+
+      <line class="ln dot" x1="622" y1="406" x2="706" y2="406"/>
+      <text class="s" x="716" y="402">пришёл новый прогон погоды →</text>
+      <text class="s" x="716" y="420">пересчёт, версия v2</text>
+
+      <line class="ln" x1="622" y1="462" x2="698" y2="462" marker-end="url(#ah)"/>
+      <g class="b-file"><rect x="700" y="436" width="280" height="52" rx="8"/>
+        <text class="m" x="716" y="457">outputs/forecasts/{D}.csv</text>
+        <text class="m" x="716" y="477">outputs/traces/{D}.jsonl</text></g>
+    </svg>
+  </div>
+</section>
+
+<section>
+  <h2>Когда что происходит</h2>
+  <div class="when">
+
+    <div>
+      <h3><span>А</span>Заранее, один раз — Куба из командной строки</h3>
+      <ol class="pipe">
+        <li><span class="k">вход</span><b>Данные турбин и архив погоды</b><code>data/raw/*.csv</code><code>Open-Meteo 06.2024 – 01.2026</code></li>
+        <li><span class="k">подготовка</span><b>Часы, простои, дыры → флаг valid</b><code>hourly.parquet</code></li>
+        <li><span class="k">обучение</span><b>LightGBM: прогноз ветра → мощность</b><code>P10 · P50 · P90</code></li>
+        <li><span class="k">результат</span><b>Модель лежит в репозитории</b><code>models/*.pkl</code></li>
+      </ol>
+    </div>
+
+    <div>
+      <h3><span>Б</span>Пользователь нажимает «Выпустить прогноз на 05.02» — главный сценарий</h3>
+      <p class="cap">Сплошная стрелка — запрос, пунктир — ответ. Шаги 6–12 повторяются, пока агент не опубликует прогноз. Каждый шаг появляется на экране сразу: SSE идёт через Caddy без буферизации.</p>
+      <div class="sheet">
+<svg class="d" viewBox="0 0 1000 790" role="img" aria-label="Последовательность вызовов при выпуске прогноза">
+<g class="loop"><rect class="fr" x="150" y="258" width="835" height="296" rx="10"/><rect class="tab" x="150" y="258" width="350" height="22" rx="10"/><text class="o lp" x="164" y="273">ЦИКЛ · ПОКА АГЕНТ НЕ ОПУБЛИКУЕТ · ≤ 8 ШАГОВ</text><text class="s halo" x="164" y="538">дальше тем же путём: check_data → run_model → analyze_forecast</text></g>
+<line class="life" x1="75" y1="54" x2="75" y2="774"/>
+<line class="life" x1="215" y1="54" x2="215" y2="774"/>
+<line class="life" x1="355" y1="54" x2="355" y2="774"/>
+<line class="life" x1="495" y1="54" x2="495" y2="774"/>
+<line class="life" x1="635" y1="54" x2="635" y2="774"/>
+<line class="life" x1="775" y1="54" x2="775" y2="774"/>
+<line class="life" x1="915" y1="54" x2="915" y2="774"/>
+<g class="b-neutral"><rect x="13" y="8" width="124" height="46" rx="9"/><text class="t" x="75" y="29" text-anchor="middle">Диспетчер</text><text class="s" x="75" y="46" text-anchor="middle">пользователь</text></g>
+<g class="b-front"><rect x="153" y="8" width="124" height="46" rx="9"/><text class="t" x="215" y="29" text-anchor="middle">Экран</text><text class="s" x="215" y="46" text-anchor="middle">Сула</text></g>
+<g class="b-back"><rect x="293" y="8" width="124" height="46" rx="9"/><text class="t" x="355" y="29" text-anchor="middle">API</text><text class="s" x="355" y="46" text-anchor="middle">Куба</text></g>
+<g class="b-back"><rect x="433" y="8" width="124" height="46" rx="9"/><text class="t" x="495" y="29" text-anchor="middle">Агент</text><text class="s" x="495" y="46" text-anchor="middle">Куба</text></g>
+<g class="b-ext"><rect x="573" y="8" width="124" height="46" rx="9"/><text class="t" x="635" y="29" text-anchor="middle">OpenAI</text><text class="s" x="635" y="46" text-anchor="middle">внешний</text></g>
+<g class="b-back"><rect x="713" y="8" width="124" height="46" rx="9"/><text class="t" x="775" y="29" text-anchor="middle">Инструменты</text><text class="s" x="775" y="46" text-anchor="middle">Куба</text></g>
+<g class="b-ext"><rect x="853" y="8" width="124" height="46" rx="9"/><text class="t" x="915" y="29" text-anchor="middle">Open-Meteo</text><text class="s" x="915" y="46" text-anchor="middle">и файлы</text></g>
+<line class="ln" x1="75" y1="100" x2="213" y2="100" marker-end="url(#ah)"/>
+<text class="lbl halo" x="145" y="93" text-anchor="middle"><tspan class="n">1</tspan>  Выпустить прогноз на 05.02</text>
+<line class="ln" x1="215" y1="134" x2="353" y2="134" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="285" y="127" text-anchor="middle"><tspan class="n">2</tspan>  POST /api/runs</text>
+<line class="ln ret" x1="355" y1="168" x2="217" y2="168" marker-end="url(#ahm)"/>
+<text class="lbl halo m" x="285" y="161" text-anchor="middle"><tspan class="n">3</tspan>  run_id</text>
+<line class="ln" x1="215" y1="202" x2="353" y2="202" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="285" y="195" text-anchor="middle"><tspan class="n">4</tspan>  GET /api/runs/{id}/events</text>
+<line class="ln" x1="355" y1="236" x2="493" y2="236" marker-end="url(#ah)"/>
+<text class="lbl halo" x="425" y="229" text-anchor="middle"><tspan class="n">5</tspan>  старт агента</text>
+<line class="ln" x1="495" y1="296" x2="633" y2="296" marker-end="url(#ah)"/>
+<text class="lbl halo" x="565" y="289" text-anchor="middle"><tspan class="n">6</tspan>  шаги + 6 инструментов</text>
+<line class="ln ret" x1="635" y1="330" x2="497" y2="330" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="565" y="323" text-anchor="middle"><tspan class="n">7</tspan>  вызови fetch_weather</text>
+<line class="ln" x1="495" y1="364" x2="773" y2="364" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="635" y="357" text-anchor="middle"><tspan class="n">8</tspan>  fetch_weather(05.02)</text>
+<line class="ln" x1="775" y1="398" x2="913" y2="398" marker-end="url(#ah)"/>
+<text class="lbl halo" x="845" y="391" text-anchor="middle"><tspan class="n">9</tspan>  по координатам</text>
+<line class="ln ret" x1="915" y1="432" x2="777" y2="432" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="845" y="425" text-anchor="middle"><tspan class="n">10</tspan>  прогноз, прогон ≤ T</text>
+<line class="ln ret" x1="775" y1="466" x2="497" y2="466" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="635" y="459" text-anchor="middle"><tspan class="n">11</tspan>  результат · JSON</text>
+<line class="ln ret" x1="495" y1="500" x2="217" y2="500" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="355" y="493" text-anchor="middle"><tspan class="n">12</tspan>  событие «шаг N» · SSE</text>
+<line class="ln" x1="495" y1="584" x2="773" y2="584" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="635" y="577" text-anchor="middle"><tspan class="n">13</tspan>  publish_forecast · v1</text>
+<line class="ln" x1="775" y1="618" x2="913" y2="618" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="845" y="611" text-anchor="middle"><tspan class="n">14</tspan>  {D}.csv + trace</text>
+<line class="ln ret" x1="495" y1="652" x2="217" y2="652" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="355" y="645" text-anchor="middle"><tspan class="n">15</tspan>  итог + сводка · SSE</text>
+<line class="ln" x1="215" y1="686" x2="353" y2="686" marker-end="url(#ah)"/>
+<text class="lbl halo m" x="285" y="679" text-anchor="middle"><tspan class="n">16</tspan>  GET /api/forecasts/{D}</text>
+<line class="ln ret" x1="355" y1="720" x2="217" y2="720" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="285" y="713" text-anchor="middle"><tspan class="n">17</tspan>  48 ч × P10 / P50 / P90</text>
+<line class="ln ret" x1="215" y1="754" x2="77" y2="754" marker-end="url(#ahm)"/>
+<text class="lbl halo" x="145" y="747" text-anchor="middle"><tspan class="n">18</tspan>  график · сводка · CSV</text>
+</svg>
+
+      </div>
+    </div>
+
+    <div>
+      <h3><span>Б′</span>Кнопка «Имитировать новый прогон погоды» — пересчёт</h3>
+      <ol class="steps">
+        <li>Экран шлёт тот же <code>POST /api/runs</code> на тот же день.</li>
+        <li>Агент берёт свежий прогон погоды через <code>fetch_weather</code> и сравнивает его со старым.</li>
+        <li>Ветер сдвинулся больше чем на 0,5 м/с или анализ поднял флаг — агент вызывает <code>recalc_forecast</code>, иначе оставляет v1 и объясняет почему.</li>
+        <li><code>publish_forecast</code> публикует v2 со строкой «что изменилось».</li>
+        <li>На графике v2 сплошной линией, v1 пунктиром.</li>
+      </ol>
+    </div>
+
+    <div>
+      <h3><span>В</span>Февраль целиком — кнопка «Прогнать февраль» или CLI</h3>
+      <ol class="pipe">
+        <li><span class="k">запуск</span><b>POST /api/backtest или</b><code>python -m windcast.backtest</code></li>
+        <li><span class="k">цикл</span><b>Путь Б для каждого выпуска</b><code>31.01 → 28.02</code></li>
+        <li><span class="k">файлы</span><b>Прогнозы и ленты шагов</b><code>outputs/forecasts/*.csv</code><code>outputs/traces/*.jsonl</code></li>
+        <li class="pass"><span class="k">проверка</span><b>Без будущего, 48 ч × 3, P10 ≤ P50 ≤ P90</b><code>scripts/verify.py → PASS</code></li>
+      </ol>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>Где встречаются фронтенд и бэкенд</h2>
+  <p class="cap">Сула и Куба договариваются только об этих запросах. Пока бэкенда нет, фронтенд работает на заглушках того же формата. Ошибки — 400 и 404 с текстом, не 500.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Запрос</th><th>Кто и когда зовёт</th><th>Что возвращает</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /api/issues</code></td><td>Экран при открытии</td><td>даты выпусков, версии, статусы</td></tr>
+        <tr><td><code>POST /api/runs</code></td><td>«Выпустить прогноз», «Имитировать новый прогон»</td><td><code>{run_id}</code> — агент стартовал</td></tr>
+        <tr><td><code>GET /api/runs/{id}/events</code></td><td>Экран, сразу после <code>run_id</code></td><td>поток шагов агента (SSE), последним — итог</td></tr>
+        <tr><td><code>GET /api/runs/{id}</code></td><td>Экран, если поток оборвался</td><td>прогон целиком, со всеми шагами</td></tr>
+        <tr><td><code>GET /api/forecasts/{D}</code></td><td>Экран, после итога</td><td>48 ч × турбина 1, 2, ВЭС: P10 / P50 / P90, факт, флаги, сводка</td></tr>
+        <tr><td><code>GET /api/forecasts/{D}.csv</code></td><td>Кнопка «Скачать CSV»</td><td>CSV выпуска</td></tr>
+        <tr><td><code>POST /api/backtest</code></td><td>«Прогнать февраль»</td><td><code>{id}</code>, дальше те же события SSE</td></tr>
+        <tr><td><code>GET /api/metrics</code></td><td>Экран «Качество»</td><td>ошибка модели и базовых методов на январе</td></tr>
+        <tr><td><code>GET /health</code></td><td>Caddy и деплой</td><td><code>{"ok": true}</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <p>Источник — <code>docs/CONTRACT.md</code> v0 плюс четыре предложенные правки: выпуск за 28.02, погода сначала из Open-Meteo и только потом из кэша, в феврале нет фактической выработки, ленты шагов в <code>outputs/traces/</code>.</p>
+  <p>Время внутри системы — UTC, на экране и в файлах — UTC+5. Мощность нормирована: 1 = номинал турбины.</p>
+</footer>
+
+</div>
+
+</body></html>
