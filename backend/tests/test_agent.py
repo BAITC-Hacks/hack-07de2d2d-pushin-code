@@ -622,7 +622,7 @@ def test_llm_loop_runs_tools_decides_and_publishes_same_numbers():
     assert "сдвиг ветра больше порога" in decision[0]["body"]
     assert not [e for e in events if e["type"] == "error"]
     request = client.requests[0]
-    assert request["model"] == "gpt-5-mini" and "temperature" not in request
+    assert request["model"] == "gpt-5.4-mini" and "temperature" not in request
     assert {t["function"]["name"] for t in request["tools"]} == set(tools.TOOLS)
     assert store.load_trace(RECALC_DAY) == events
 

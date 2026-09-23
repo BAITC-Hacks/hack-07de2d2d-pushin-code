@@ -28,7 +28,9 @@ MODES = ("agent", "deterministic")
 TRIGGERS = ("issue", "new_weather_run")
 SCENARIOS = (None, "weather_outage")
 MAX_TOOL_CALLS = 8
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.4-mini"
+# Only the 2025-08 gpt-5 family accepts reasoning_effort together with tools in chat.completions.
+_EFFORT_MODELS = re.compile(r"^gpt-5(-mini|-nano)?(-\d{4}-\d{2}-\d{2})?$")
 
 SYSTEM_PROMPT = """Ты — агент диспетчера ветроэлектростанции: две турбины, ВЭС = среднее двух \
 турбин, мощность — доля номинала. Ты сам ведёшь цикл выпуска почасового прогноза на 48 ч \
@@ -442,8 +444,8 @@ def _run_llm(
         {"role": "user", "content": user},
     ]
     kwargs: dict[str, Any] = {"model": model, "tools": registry.schemas()}
-    effort = os.environ.get("OPENAI_REASONING_EFFORT", "low").strip()
-    if effort and model.startswith("gpt-5"):
+    effort = os.environ.get("OPENAI_REASONING_EFFORT", "").strip()
+    if effort and _EFFORT_MODELS.match(model):
         kwargs["reasoning_effort"] = effort
     while True:
         if ctx.tool_calls >= MAX_TOOL_CALLS:

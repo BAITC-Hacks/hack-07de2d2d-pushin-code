@@ -236,8 +236,10 @@ def _error(resp, status):
 def test_health_counts_records_and_reads_model_version(client, monkeypatch):
     fake = types.ModuleType("windcast.model")
     fake.MODEL_VERSION = "lgbm-q-test"
+    fake.predict = lambda issue_date, weather: None
     monkeypatch.setitem(sys.modules, "windcast.model", fake)
     body = client.get("/health").json()
+    assert set(body.pop("ports")) == {"weather", "data", "model"}
     assert body == {
         "ok": True,
         "mode": "deterministic",
@@ -252,7 +254,7 @@ def test_health_stub_model_and_agent_mode(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "windcast.model", None)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
     body = client.get("/health").json()
-    assert body["model_version"] == "stub" and body["mode"] == "agent"
+    assert body["model_version"].startswith("stub") and body["mode"] == "agent"
     monkeypatch.setenv("OPENAI_API_KEY", "sk-...")  # the .env.example placeholder
     assert client.get("/health").json()["mode"] == "deterministic"
 
@@ -435,7 +437,7 @@ def test_live_status(client, root, monkeypatch):
         "now_local": "2026-09-23T13:00+05:00",
         "latest_run_utc": "2026-09-23T00:00Z",
         "next_run_utc": "2026-09-23T06:00Z",
-        "next_run_available_local": "2026-09-23T18:00+05:00",
+        "next_run_available_local": "2026-09-23T19:00+05:00",
         "current": {
             "version": 1,
             "issued_at_local": "2026-09-23T15:05+05:00",

@@ -864,7 +864,7 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 _RUN_PROP = {
     "type": "string",
     "enum": list(RUNS),
-    "description": "previous — прогон для v1 (previous_day2 на всё окно); latest — самый свежий прогон до T",
+    "description": "previous — прогон на сутки старше, для v1; latest — самый свежий прогон, опубликованный до момента выпуска T",
 }
 
 TOOL_SCHEMAS = [

@@ -15,7 +15,6 @@ Every 4xx is {"error": "<текст по-русски>"}; unexpected failures ar
 from __future__ import annotations
 
 import csv
-import importlib
 import io
 import json
 from collections.abc import AsyncIterator
@@ -31,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException
 
-from windcast import paths, runs, timeline, watcher
+from windcast import paths, ports, runs, timeline, watcher
 
 LIVE = "live"
 MODES = ("agent", "deterministic")
@@ -55,7 +54,8 @@ CSV_COLUMNS = (
 RUN_FROM, RUN_TO = timeline.BACKTEST_FROM, timeline.TEST_TO  # dates a run may target
 MAX_RANGE_DAYS = 366
 ECMWF_CYCLE_H = 6  # ECMWF IFS runs at 00/06/12/18 UTC
-ECMWF_DELAY_H = 7  # a run becomes available ~7 h after its init time
+# a run becomes available this many hours after its init time (contract §2)
+ECMWF_DELAY_H = int(timeline.RUN_AVAILABILITY_DELAY.total_seconds() // 3600)
 SSE_HEADERS = {
     # no-transform keeps compressing proxies (Caddy `encode`) from buffering the stream
     "Cache-Control": "no-cache, no-transform",
@@ -380,7 +380,7 @@ def _weather_runs(version: dict, issue_time_utc: Any) -> list[dict]:
         item = dict(item)
         init = _parse_dt(item.get("init_utc"))
         if "before_issue" not in item and moment and init:
-            item["before_issue"] = init <= moment
+            item["before_issue"] = init + timeline.RUN_AVAILABILITY_DELAY <= moment
         out.append(item)
     return out
 
@@ -576,9 +576,17 @@ def _metrics_or_404() -> dict:
 
 def _model_version() -> str:
     try:
-        return str(importlib.import_module("windcast.model").MODEL_VERSION)
+        return ports.model_version()
     except Exception:  # noqa: BLE001 — a broken or absent model must not break /health
         return "stub"
+
+
+def _ports_status() -> dict[str, str]:
+    """Which parts run on real code and which on stubs — contract §5.1 wants this visible."""
+    try:
+        return ports.status()
+    except Exception:  # noqa: BLE001 — /health must answer even if a port is broken
+        return {"weather": "error", "data": "error", "model": "error"}
 
 
 def _run_or_404(run_id: str) -> runs.Run:
@@ -599,6 +607,7 @@ def health() -> dict[str, Any]:
         "mode": runs.default_mode(),
         "model_version": _model_version(),
         "issues_ready": ready,
+        "ports": _ports_status(),
         **watcher.status(),
     }
 
