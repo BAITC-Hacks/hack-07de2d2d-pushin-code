@@ -792,3 +792,47 @@ def test_backtest_continues_after_a_failed_issue(client, monkeypatch):
 )
 def test_backtest_validation(client, payload):
     _error(client.post("/api/backtest", json=payload), 400)
+
+
+def test_backtest_stops_when_agent_is_missing(client, monkeypatch):
+    monkeypatch.setitem(sys.modules, "windcast.agent", None)
+    run_id = client.post(
+        "/api/backtest", json={"from": "2026-02-12", "to": ISSUE}
+    ).json()["id"]
+    events = _sse(client.get(f"/api/runs/{run_id}/events").text)
+    assert [e["type"] for e in events] == ["error", "verdict", "verdict"]
+    assert events[0]["title"] == "Агент ещё не подключён"
+    assert events[-1]["title"] == "Готово: 0 выпусков"
+    assert events[-1]["meta"]["status"] == "error"
+
+
+def test_events_are_plain_json_in_schema_order(client, monkeypatch):
+    np = pytest.importorskip("numpy")
+
+    def runner(issue_date, *, mode, trigger, emit):
+        emit(
+            {
+                "title": "числа",
+                "extra": 1,
+                "meta": {
+                    "args": {
+                        "n": np.int64(3),
+                        "x": np.float64("nan"),
+                        "when": datetime(2026, 2, 13, 19, tzinfo=timezone.utc),
+                    }
+                },
+            }
+        )
+        emit({"type": "verdict", "title": "ok", "seq": 99})
+
+    monkeypatch.setattr(runs, "RUNNER", runner)
+    run_id = client.post("/api/runs", json={"issue_date": ISSUE}).json()["id"]
+    events = _sse(client.get(f"/api/runs/{run_id}/events").text)
+    assert list(events[0])[:6] == ["seq", "ts", "type", "title", "body", "meta"]
+    assert events[0]["type"] == "thought" and events[0]["extra"] == 1
+    assert events[0]["meta"]["args"] == {
+        "n": 3,
+        "x": None,
+        "when": "2026-02-13T19:00:00+00:00",
+    }
+    assert [e["seq"] for e in events] == [1, 2]  # the stream numbers events itself

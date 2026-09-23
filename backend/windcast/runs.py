@@ -112,18 +112,22 @@ class Run:
     # --- producer side (runner thread) ---
     def emit(self, event: Any, *, issue_date: str | None = None) -> dict:
         """Store one event and wake the subscribers. issue_date forces meta.issue_date."""
-        ev = jsonable(event) if isinstance(event, dict) else {"title": str(event)}
-        meta = ev.get("meta") if isinstance(ev.get("meta"), dict) else {}
+        raw = jsonable(event) if isinstance(event, dict) else {"title": str(event)}
+        meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
         if issue_date:
             meta["issue_date"] = issue_date
         elif not meta.get("issue_date") and self.issue_date:
             meta["issue_date"] = self.issue_date
-        ev["meta"] = meta
-        ev.setdefault("type", "thought")
-        ev.setdefault("title", "")
-        ev.setdefault("body", "")
-        if not ev.get("ts"):
-            ev["ts"] = now_local_iso()
+        ev = {  # key order of docs/references/trace-event-schema.md
+            "seq": 0,
+            "ts": raw.get("ts") or now_local_iso(),
+            "type": raw.get("type") or "thought",
+            "title": raw.get("title") if raw.get("title") is not None else "",
+            "body": raw.get("body") if raw.get("body") is not None else "",
+            "meta": meta,
+        }
+        for key, value in raw.items():
+            ev.setdefault(key, value)
         with self._lock:
             ev["seq"] = len(self.events) + 1
             self.events.append(ev)
@@ -388,6 +392,10 @@ def _execute_issue(run: Run) -> None:
     version, failed = None, False
     try:
         version = _call_runner(run, run.issue_date or "", run.trigger, run.emit)
+    except AgentUnavailable as exc:
+        log.warning("run %s: %s: %s", run.id, AGENT_MISSING, exc)
+        failed = True
+        run.emit(_error_event(exc))
     except Exception as exc:  # never let a runner take the server down
         log.exception("run %s failed", run.id)
         failed = True
@@ -413,12 +421,16 @@ def _execute_backtest(run: Run, days: list[str]) -> None:
             try:
                 version = _call_runner(run, day, "issue", emit)
                 published.append(day)
+            except AgentUnavailable as exc:
+                log.warning("backtest %s: %s: %s", run.id, AGENT_MISSING, exc)
+                bad = aborted = True
+                failed.append(day)
+                emit(_error_event(exc))
             except Exception as exc:
                 log.exception("backtest %s: issue %s failed", run.id, day)
                 bad = True
                 failed.append(day)
                 emit(_error_event(exc))
-                aborted = isinstance(exc, AgentUnavailable)
             _close_issue(emit, run, start, version, bad)
             if aborted:
                 break

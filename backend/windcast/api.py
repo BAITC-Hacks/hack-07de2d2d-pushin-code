@@ -678,6 +678,7 @@ async def run_events(run_id: str, request: Request) -> Response:
     run = _run_or_404(run_id)
     last_id = request.headers.get("last-event-id") or request.query_params.get("after")
     after = int(last_id) if last_id and last_id.strip().isdigit() else 0
+    after = min(after, run.event_count())
     if after and run.done and after >= run.event_count():
         return Response(status_code=204)  # tells EventSource not to reconnect
     return StreamingResponse(
