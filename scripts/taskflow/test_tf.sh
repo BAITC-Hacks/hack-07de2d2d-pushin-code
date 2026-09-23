@@ -140,6 +140,7 @@ export TASKFLOW_GH_STATE="$TEST_TMP/gh.state"
 export TASKFLOW_GH_BODY="$TEST_TMP/gh.body"
 export TASKFLOW_BROWSER_LOG="$TEST_TMP/browser.log"
 export TASKFLOW_FORGE=github
+export TASKFLOW_DRIVER_TEST_ACTIVE=1
 
 start_output=$("$REPO/scripts/taskflow/tf.sh" start 'Add fixture endpoint' --name endpoint --base main --path "$WORKTREE")
 assert_contains 'status=created' "$start_output"
@@ -181,5 +182,18 @@ assert_contains 'status=passed' "$verify_output"
 update_output=$(cd "$WORKTREE" && scripts/taskflow/tf.sh ship --title 'Fixture endpoint updated' --body-file "$BODY" --base main)
 assert_contains 'status=updated' "$update_output"
 assert_file "$TASKFLOW_BROWSER_LOG"
+
+STACKED="$TEST_TMP/stacked-worktree"
+stacked_start=$("$REPO/scripts/taskflow/tf.sh" start 'Stacked fixture endpoint' --name stacked --base endpoint --path "$STACKED")
+assert_contains 'status=created' "$stacked_start"
+printf '\n# stacked task change\n' >> "$STACKED/app.py"
+(cd "$STACKED" && git add app.py)
+(cd "$STACKED" && scripts/taskflow/tf.sh commit --message 'Add stacked fixture endpoint') >/dev/null
+stacked_verify=$(cd "$STACKED" && scripts/taskflow/tf.sh verify)
+assert_contains 'status=passed' "$stacked_verify"
+stacked_receipt=$(printf '%s\n' "$stacked_verify" | sed -n 's/.* receipt=//p')
+assert_contains 'base=endpoint' "$(cat "$stacked_receipt")"
+stacked_ship=$(cd "$STACKED" && scripts/taskflow/tf.sh ship --title 'Stacked fixture endpoint' --body-file "$BODY" --base endpoint)
+assert_contains 'status=updated' "$stacked_ship"
 
 printf 'PASS: taskflow driver integration tests\n'
