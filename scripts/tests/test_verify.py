@@ -60,12 +60,24 @@ def utc(when: datetime) -> str:
     return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
+BUCKETS = ((1, 17), (18, 41), (42, 48))  # §2 v0.4: h -> previous_day1, day2, day3
+
+
+def run_start(t: datetime, h: int) -> datetime:
+    """§2 v0.4: the latest run for hour h — its target minus N days, floored to 00/06/12/18Z.
+
+    With these buckets the latest start of any hour is D 06:00Z, published ≈ D 14:00Z < T.
+    """
+    days = next(n for n, (lo, hi) in enumerate(BUCKETS, start=1) if lo <= h <= hi)
+    start = t + timedelta(hours=h - 1) - timedelta(days=days)
+    return start.replace(hour=start.hour - start.hour % 6)
+
+
 def issue_rows(issue: str, version: int) -> list[dict[str, str]]:
     t = moment(issue)
     rows = []
     for turbine in ("1", "2", "plant"):
         for h in range(1, 49):
-            run = t - timedelta(hours=19 if h <= 24 else 43)  # D 00Z / D-1 00Z runs
             p50 = 0.2 + h / 200
             rows.append(
                 {
@@ -78,7 +90,7 @@ def issue_rows(issue: str, version: int) -> list[dict[str, str]]:
                     "p50": f"{p50:.4f}",
                     "p90": f"{p50 + 0.15:.4f}",
                     "wind_fc_ms": f"{5 + h / 10:.1f}",
-                    "weather_init_max_utc": utc(run),
+                    "weather_init_max_utc": utc(run_start(t, h)),
                     "version": str(version),
                 }
             )
@@ -89,15 +101,11 @@ def issue_record(issue: str, version: int) -> dict:
     t = moment(issue)
     runs = [
         {
-            "hours": "1-24",
+            "hours": f"{lo}-{hi}",
             "model": "ecmwf_ifs025",
-            "init_utc": utc(t - timedelta(hours=19)),
-        },
-        {
-            "hours": "25-48",
-            "model": "ecmwf_ifs025",
-            "init_utc": utc(t - timedelta(hours=43)),
-        },
+            "init_utc": utc(max(run_start(t, h) for h in range(lo, hi + 1))),
+        }
+        for lo, hi in BUCKETS
     ]
     return {
         "issue_date": issue,
@@ -233,27 +241,47 @@ def test_valid_tree_passes(tmp_path):
     }
     assert check(result, "issues")["checked"] == 2
     assert check(result, "no_future")["checked"] == 2 * 144
-    assert (
-        check(result, "no_future_runs")["checked"] == 2 * 2 * 2
-    )  # issues x versions x runs
+    runs = check(result, "no_future_runs")["checked"]
+    assert runs == 2 * 2 * len(BUCKETS)  # issues x versions x runs
     assert check(result, "combined")["checked"] == 2 * 144
 
 
-def test_future_weather_init_fails_the_no_future_rule(tmp_path):
-    def leak(rows):
-        rows[5]["weather_init_max_utc"] = f"{ISSUES[1]}T20:00Z"  # T is 19:00Z
+@pytest.mark.parametrize(
+    "start, published",
+    [
+        ("06:00", True),  # published ≈ 14:00Z, before T = 19:00Z
+        ("11:00", True),  # published ≈ 19:00Z = T: still in time, init + 8 h ≤ T
+        ("12:00", False),  # starts before T, but is published ≈ 20:00Z, after it
+        ("18:00", False),  # the example from contract §2
+        ("20:00", False),  # starts after T
+    ],
+)
+def test_run_counts_only_once_published_by_the_issue_moment(tmp_path, start, published):
+    def edit(rows):
+        rows[5]["weather_init_max_utc"] = f"{ISSUES[1]}T{start}Z"
 
-    root = build(tmp_path, rows=only_issue(1, leak))
+    code, result = report(build(tmp_path, rows=only_issue(1, edit)))
+    expected = (0, []) if published else (1, ["no_future"])
+    assert (code, result["failed_checks"]) == expected
+
+
+def test_run_published_after_the_issue_moment_is_named(tmp_path):
+    def edit(rows):
+        rows[5]["weather_init_max_utc"] = f"{ISSUES[1]}T12:00Z"  # before T = 19:00Z
+
+    root = build(tmp_path, rows=only_issue(1, edit))
     code, result = report(root)
     assert code == 1 and result["failed_checks"] == ["no_future"]
     [problem] = check(result, "no_future")["problems"]
     assert problem["file"] == f"outputs/forecasts/{ISSUES[1]}.csv"
     assert problem["line"] == 7  # the header is line 1, rows[5] is line 7
-    assert f"T={ISSUES[1]}T19:00Z" in problem["message"]
+    assert problem["message"] == (
+        "turbine=1 h=6 · weather_init_max_utc: прогон 2026-02-02T12:00Z опубликован "
+        "≈ 2026-02-02T20:00Z, позже момента выпуска T=2026-02-02T19:00Z"
+    )
 
     text = verify(root, *RANGE).stdout
-    assert "✗ Без будущего: weather_init_max_utc ≤ T" in text
-    assert f"{ISSUES[1]}T20:00Z" in text
+    assert "✗ Без будущего: прогон опубликован до T (CSV)" in text
     assert text.strip().splitlines()[-1] == "FAIL: 1 проверка не пройдена"
 
 
@@ -267,13 +295,20 @@ def test_weather_init_without_zone_or_unparseable_fails(tmp_path, value):
     assert "не время с зоной" in messages(result, "no_future")
 
 
-def test_future_run_in_the_issue_record_fails(tmp_path):
-    def late(record):
-        record["versions"]["1"]["weather_runs"][0]["init_utc"] = f"{ISSUES[0]}T21:00Z"
+@pytest.mark.parametrize("start, published", [("06:00", True), ("12:00", False)])
+def test_record_runs_count_only_once_published(tmp_path, start, published):
+    def edit(record):
+        record["versions"]["1"]["weather_runs"][0]["init_utc"] = f"{ISSUES[0]}T{start}Z"
 
-    code, result = report(build(tmp_path, record=only_issue(0, late)))
-    assert code == 1 and result["failed_checks"] == ["no_future_runs"]
-    assert "v1 weather_runs[0]" in messages(result, "no_future_runs")
+    code, result = report(build(tmp_path, record=only_issue(0, edit)))
+    if published:
+        assert (code, result["failed_checks"]) == (0, [])
+    else:
+        assert (code, result["failed_checks"]) == (1, ["no_future_runs"])
+        assert messages(result, "no_future_runs") == (
+            "v1 weather_runs[0] (часы 1-17): прогон 2026-02-01T12:00Z опубликован "
+            "≈ 2026-02-01T20:00Z, позже момента выпуска T=2026-02-01T19:00Z"
+        )
 
 
 def test_missing_trace_fails(tmp_path):

@@ -6,17 +6,19 @@
 For every issue D in the range it checks, against docs/CONTRACT.md:
 - the §7 CSV outputs/forecasts/{D}.csv: columns in order, 48 h x {1, 2, plant}, issue and
   target times in +05:00, one version, P10 <= P50 <= P90 in [0, 1], wind in [0, 60);
-- the §2 rule "no future": weather_init_max_utc <= T in every row, and every weather run of
-  every version in the issue record starts <= T;
+- the §2 rule "no future": a weather run counts only once published, ~8 h after its start,
+  so weather_init_max_utc + 8 h <= T in every row, and the same for every weather run of
+  every version in the issue record;
 - the agent trace outputs/traces/{D}.jsonl: event schema, an action, a final verdict;
 - the §5.1 record outputs/forecasts/{D}.json: latest_version = the CSV version, no "stub";
 then the combined outputs/forecast_feb2026.csv and the January metrics (model nMAE below
 every baseline).
 
 Standard library only, so plain python3 from a clean clone is enough. The time conventions
-(§1: T = D 19:00 UTC = (D+1) 00:00 at UTC+5; target hour h starts at T + (h - 1) h) are
-restated here on purpose instead of importing backend/windcast/timeline.py: a checker that
-reused the code under test would agree with its bugs.
+(§1: T = D 19:00 UTC = (D+1) 00:00 at UTC+5; target hour h starts at T + (h - 1) h; §2: the
+8 h publication delay) are restated here on purpose instead of importing
+backend/windcast/timeline.py: a checker that reused the code under test would agree with its
+bugs.
 
 Exit code 0 = PASS, 1 = FAIL. Human output is in Russian: the jury reads it.
 """
@@ -40,6 +42,9 @@ TURBINES = ("1", "2", "plant")
 ROWS_PER_ISSUE = HORIZON * len(TURBINES)
 TEST_FROM = date(2026, 1, 31)
 TEST_TO = date(2026, 2, 28)
+# docs/CONTRACT.md §2 (v0.4): a weather run is usable only once published, ~8 h after it
+# starts (ECMWF open data). "No future" = init + 8 h <= T, i.e. the run started by D 11:00 UTC.
+RUN_PUBLICATION_DELAY = timedelta(hours=8)
 COLUMNS = (
     "issue_date",
     "issue_time_local",
@@ -83,6 +88,17 @@ def iso_local(moment: datetime) -> str:
 
 def iso_utc(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def published_late(init: datetime, moment: datetime) -> str | None:
+    """None if the run started at `init` was published by T (§2), else what went wrong."""
+    published = init + RUN_PUBLICATION_DELAY
+    if published <= moment:
+        return None
+    return (
+        f"прогон {iso_utc(init)} опубликован ≈ {iso_utc(published)}, "
+        f"позже момента выпуска T={iso_utc(moment)}"
+    )
 
 
 _MOMENT = re.compile(
@@ -204,9 +220,11 @@ class Check:
 def new_checks() -> list[Check]:
     return [
         Check("issues", "Выпуски на месте: forecasts/{D}.csv", "выпусков"),
-        Check("no_future", "Без будущего: weather_init_max_utc ≤ T", "строк"),
+        Check("no_future", "Без будущего: прогон опубликован до T (CSV)", "строк"),
         Check(
-            "no_future_runs", "Без будущего: прогоны в записи выпуска ≤ T", "прогонов"
+            "no_future_runs",
+            "Без будущего: прогон опубликован до T ({D}.json)",
+            "прогонов",
         ),
         Check("header", "Заголовок CSV: столбцы §7 по порядку", "файлов"),
         Check("rows", "144 строки: турбины 1, 2, plant × h 1…48", "файлов"),
@@ -442,15 +460,9 @@ class Verifier:
                     "(нужно вида 2026-02-13T00:00Z), будущее не исключить"
                 )
             ]
-        elif init > moment:
-            future = [
-                (
-                    f"weather_init_max_utc={raw} позже момента выпуска "
-                    f"T={iso_utc(moment)} — прогноз использует данные из будущего"
-                )
-            ]
         else:
-            future = []
+            late = published_late(init, moment)
+            future = [f"weather_init_max_utc: {late}"] if late else []
         self.checks["no_future"].add(problems(future))
 
     # outputs/traces/{D}.jsonl
@@ -552,7 +564,7 @@ class Verifier:
         return record
 
     def check_record_runs(self, issue: date, label: str, versions: dict) -> None:
-        """Every weather run of every version (v1 included) was initialised by T."""
+        """Every weather run of every version (v1 included) was published by T (§2)."""
         moment = issue_moment(issue)
         check = self.checks["no_future_runs"]
         for key in sorted(versions, key=lambda k: (len(k), k)):
@@ -568,14 +580,11 @@ class Verifier:
                 if init is None:
                     message = f"{where}: init_utc={show(raw)} — не время с зоной"
                     check.add([Problem(label, None, message)])
-                elif init > moment:
-                    message = (
-                        f"{where}: init_utc={raw} позже момента выпуска "
-                        f"T={iso_utc(moment)}"
-                    )
-                    check.add([Problem(label, None, message)])
                 else:
-                    check.add([])
+                    late = published_late(init, moment)
+                    check.add(
+                        [Problem(label, None, f"{where}: {late}")] if late else []
+                    )
 
     def check_no_stub(
         self, issue: date, record: dict | None, events: list[tuple[int, dict]] | None
@@ -745,6 +754,10 @@ def render(checks: list[Check], root: Path, first: date, last: date) -> str:
         f"Windcast · проверка выпусков {first} … {last} ({count} {issues})",
         f"Корень: {root}",
         "T — момент выпуска D: D 19:00 UTC = (D+1) 00:00 по UTC+5",
+        (
+            "Прогон погоды годен, если опубликован до T: старт + 8 ч ≤ T, "
+            "т. е. старт не позже D 11:00 UTC (§2)"
+        ),
     ]
     if not (root / "outputs").is_dir():
         lines.append("Внимание: нет каталога outputs/ — верно ли указан --root?")
