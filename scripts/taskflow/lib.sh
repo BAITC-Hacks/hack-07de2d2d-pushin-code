@@ -314,8 +314,8 @@ tf_sha256() {
 }
 
 tf_start() {
-  local task='' requested_name='' base='' path='' base_ref branch slug explicit_name=false
-  local existing state_file state_task candidate index=1 parent path_abs
+  local task='' requested_name='' base='' path='' base_ref branch slug explicit_name=false ff_base=false
+  local existing state_file state_task candidate index=1 parent path_abs current_head
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -328,6 +328,8 @@ tf_start() {
       --path)
         [ $# -ge 2 ] || { tf_error 'start --path requires a value.'; return 1; }
         path=$2; shift 2 ;;
+      --ff-base)
+        ff_base=true; shift ;;
       -*) tf_error "start: unknown option $1"; return 1 ;;
       *)
         [ -z "$task" ] || { tf_error 'start accepts one plain task description.'; return 1; }
@@ -380,6 +382,23 @@ tf_start() {
         tf_error "Branch '$branch' is already attached to $existing, not $path."
         return 1
       }
+    fi
+    if [ "$ff_base" = true ] && [ "$(git -C "$existing" rev-parse HEAD)" != "$(git -C "$TF_PROJECT_ROOT" rev-parse "$base_ref")" ]; then
+      [ -z "$(git -C "$existing" status --porcelain)" ] || {
+        tf_error "Cannot fast-forward dirty worktree '$existing'."
+        return 1
+      }
+      current_head=$(git -C "$existing" rev-parse HEAD) || return 1
+      git -C "$existing" merge-base --is-ancestor "$current_head" "$base_ref" || {
+        tf_error "Cannot fast-forward '$branch': it has task commits outside selected base '$base'."
+        return 1
+      }
+      git -C "$existing" reset --keep "$base_ref" || {
+        tf_error "Could not fast-forward '$branch' to '$base'."
+        return 1
+      }
+      tf_result "status=fast_forwarded task=$task branch=$branch path=$existing base=$base"
+      return 0
     fi
     tf_result "status=existing task=$task branch=$branch path=$existing base=$base"
     return 0

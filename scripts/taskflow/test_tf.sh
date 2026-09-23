@@ -186,6 +186,10 @@ assert_contains 'https://github.example.test/org/project/pull/7' "$ship_output"
 assert_contains 'Branch: endpoint' "$(cat "$TASKFLOW_GH_BODY")"
 assert_contains 'Exact taskflow verification receipt' "$(cat "$TASKFLOW_GH_BODY")"
 
+FOLLOWER="$TEST_TMP/follower-worktree"
+follower_start=$("$REPO/scripts/taskflow/tf.sh" start 'Follow fixture endpoint' --name follower --base endpoint --path "$FOLLOWER")
+assert_contains 'status=created' "$follower_start"
+
 printf '\n# unverified follow-up\n' >> "$WORKTREE/app.py"
 (cd "$WORKTREE" && git add app.py && git commit -qm 'Unverified follow-up')
 if (cd "$WORKTREE" && scripts/taskflow/tf.sh ship --title 'Should be blocked' --body-file "$BODY" --base main); then
@@ -197,6 +201,10 @@ assert_contains 'status=passed' "$verify_output"
 update_output=$(cd "$WORKTREE" && scripts/taskflow/tf.sh ship --title 'Fixture endpoint updated' --body-file "$BODY" --base main)
 assert_contains 'status=updated' "$update_output"
 assert_file "$TASKFLOW_BROWSER_LOG"
+
+follower_resume=$("$REPO/scripts/taskflow/tf.sh" start 'Follow fixture endpoint' --name follower --base endpoint --path "$FOLLOWER" --ff-base)
+assert_contains 'status=fast_forwarded' "$follower_resume"
+[ "$(git -C "$FOLLOWER" rev-parse HEAD)" = "$(git -C "$WORKTREE" rev-parse HEAD)" ] || fail 'untouched follower did not fast-forward to its base'
 
 STACKED="$TEST_TMP/stacked-worktree"
 stacked_start=$("$REPO/scripts/taskflow/tf.sh" start 'Stacked fixture endpoint' --name stacked --base endpoint --path "$STACKED")
