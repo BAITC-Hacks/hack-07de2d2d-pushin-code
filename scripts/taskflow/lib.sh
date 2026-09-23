@@ -476,14 +476,14 @@ tf_find_python_roots() {
     printf '%s\n' "$(dirname "$candidate")"
     found=1
   done < <(find "$root" \
-    \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+    \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
        -o -path "$root/.taskflow-worktrees" -o -path '*/__pycache__' -o -path '*/.tox' \) -prune -o \
     -type f \( -name pyproject.toml -o -name setup.py -o -name setup.cfg -o -name requirements.txt \
        -o -name 'requirements-*.txt' -o -name uv.lock -o -name poetry.lock -o -name Pipfile \) -print)
 
   if [ "$found" -eq 0 ]; then
     candidate=$(find "$root" \
-      \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+      \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
          -o -path "$root/.taskflow-worktrees" -o -path '*/__pycache__' \) -prune -o \
       -type f -name '*.py' -print -quit)
     [ -n "$candidate" ] && printf '%s\n' "$root"
@@ -493,7 +493,7 @@ tf_find_python_roots() {
 tf_find_js_roots() {
   local root=$1 candidate
   find "$root" \
-    \( -path "$root/.git" -o -path "$root/node_modules" -o -path "$root/.venv" -o -path "$root/venv" \
+    \( -path "$root/.git" -o -path '*/node_modules' -o -path '*/.venv' -o -path '*/venv' \
        -o -path "$root/.taskflow-worktrees" -o -path '*/dist' -o -path '*/build' -o -path '*/.next' \) -prune -o \
     -type f -name package.json -print | while IFS= read -r candidate; do
       [ -n "$candidate" ] && dirname "$candidate"
@@ -504,7 +504,7 @@ tf_has_python_tests() {
   local root=$1 test_file
   [ -d "$root/tests" ] && return 0
   test_file=$(find "$root" \
-    \( -path "$root/.git" -o -path "$root/.venv" -o -path "$root/venv" -o -path "$root/node_modules" \
+    \( -path "$root/.git" -o -path '*/.venv' -o -path '*/venv' -o -path '*/node_modules' \
        -o -path '*/__pycache__' \) -prune -o -type f \
     \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)
   [ -n "$test_file" ]
