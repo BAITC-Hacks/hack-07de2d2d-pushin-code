@@ -642,6 +642,22 @@ def february_csv() -> Response:
     return _csv_response(data, "forecast_feb2026.csv")
 
 
+EVALUATION_FILES = frozenset(
+    {"february_day_ahead.csv", "february_all_horizons.csv", "january_day_ahead.csv"}
+)
+
+
+@app.get("/api/evaluation/{name}")
+def evaluation_csv(name: str) -> Response:
+    """Tidy files for scripts/score.py; served from an allow-list, never a free path."""
+    if name not in EVALUATION_FILES:
+        _fail(404, f"Нет такого файла оценки: {name}")
+    data = _read_bytes(paths.outputs_dir() / "evaluation" / name)
+    if data is None:
+        _fail(404, f"Файл оценки ещё не собран: {name}")
+    return _csv_response(data, name)
+
+
 @app.get("/api/forecasts/live")
 def live_forecast(version: str = "latest", turbine: str = "all") -> dict[str, Any]:
     wanted = _version_param(version)

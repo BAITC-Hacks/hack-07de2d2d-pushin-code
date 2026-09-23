@@ -421,6 +421,19 @@ def test_csv_errors_and_february(client, root):
     assert resp.status_code == 200 and resp.text == CSV_FILE
 
 
+def test_evaluation_csv_allow_list(client, root):
+    _error(client.get("/api/evaluation/february_day_ahead.csv"), 404)  # not built yet
+    (root / "outputs" / "evaluation").mkdir()
+    (root / "outputs" / "evaluation" / "february_day_ahead.csv").write_text(
+        CSV_FILE, encoding="utf-8"
+    )
+    resp = client.get("/api/evaluation/february_day_ahead.csv")
+    assert resp.status_code == 200 and resp.text == CSV_FILE
+    assert resp.headers["content-type"].startswith("text/csv")
+    _error(client.get("/api/evaluation/metrics_jan.json"), 404)
+    assert client.get("/api/evaluation/..%2Fforecast_feb2026.csv").status_code == 404
+
+
 # --- §6.3 traces ------------------------------------------------------------------------------
 
 

@@ -22,6 +22,7 @@ cp .env.example .env              # необязательно: без OPENAI_AP
 docker compose up --build         # первая сборка — несколько минут; затем открыть http://localhost:8080
 curl http://localhost:8080/health # в другом терминале: {"ok":true,…,"issues_ready":29,"ports":{…"real"}}
 python3 scripts/verify.py         # из корня клона, только стандартная библиотека → PASS (14 проверок)
+python3 scripts/score.py --actual <папка с turbine_1.csv и turbine_2.csv>  # точность февраля, § 9
 ```
 
 **Как проверить за 3 минуты** — [§ 8](#8-проверка-основного-сценария). Без Docker —
@@ -778,6 +779,25 @@ cd ml-prognoz-model && uv sync --extra dev && uv run pytest
 
 Подробности — [`ml-prognoz-model/README.md`](ml-prognoz-model/README.md) и
 [`ml-prognoz-model/docs/results.md`](ml-prognoz-model/docs/results.md).
+
+### Как проверить точность февраля
+
+Для жюри с фактом за февраль — три файла в [`outputs/evaluation/`](outputs/evaluation/README.md)
+(доли номинала 0–1, `plant` = среднее турбин 1 и 2, целевой час начинается в `target_time_local`, UTC+5):
+`february_day_ahead.csv` — один прогноз на час (выпуск D−1, h 1–24, 2016 строк), `february_all_horizons.csv` —
+все 4176 строк с h 1–48, `january_day_ahead.csv` — январь с колонкой `actual` для проверки самого скрипта.
+Оценка одной командой, только стандартная библиотека:
+
+```bash
+python3 scripts/score.py --actual <папка с turbine_1.csv и turbine_2.csv за февраль>   # --json для машин
+python3 scripts/score.py --actual data/raw --forecast outputs/evaluation/january_day_ahead.csv   # самопроверка
+```
+
+Самопроверка на январе: nMAE ВЭС 14,71 % по 732 часам — то же число, что из колонки `actual`
+(15,76 % выше в этом разделе — все 48 горизонтов, 1417 часов). Скачать: https://pushin.codes/api/evaluation/february_day_ahead.csv,
+https://pushin.codes/api/evaluation/february_all_horizons.csv. Часы SCADA организатора мы считаем UTC+6
+(выбрано на январе); если иначе — `--scada-utc-offset 5`. Метрики и правила отбора часов —
+[`outputs/evaluation/README.md`](outputs/evaluation/README.md).
 
 ## 10. Структура репозитория
 
