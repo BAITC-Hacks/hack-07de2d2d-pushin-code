@@ -5,6 +5,12 @@ import useAgentRun from './useAgentRun';
 import { ApiError } from './api';
 import { localFromUtc, localStamp, utcLabel } from './format';
 
+const TURBINES = [
+  { key: 'plant', label: 'ВЭС' },
+  { key: '1', label: 'Турбина 1' },
+  { key: '2', label: 'Турбина 2' },
+];
+
 const OUTCOME = {
   published: 'выпустил',
   kept: 'оставил как есть',
@@ -44,13 +50,14 @@ export default function Live({ api, active }) {
   const [forecastError, setForecastError] = useState(null);
   const [journal, setJournal] = useState([]);
   const [journalError, setJournalError] = useState(null);
+  const [turbine, setTurbine] = useState('plant');
   const agent = useAgentRun(api);
 
   const refresh = useCallback(() => {
     api.getLiveStatus().then((value) => { setStatus(value); setStatusError(null); }).catch((error) => setStatusError(errorText(error)));
-    api.getForecast('live', 'plant').then((value) => { setForecast(value); setForecastError(null); }).catch((error) => { setForecast(null); setForecastError(errorText(error)); });
+    api.getForecast('live', turbine).then((value) => { setForecast(value); setForecastError(null); }).catch((error) => { setForecast(null); setForecastError(errorText(error)); });
     api.getLiveJournal({ limit: 20 }).then((value) => { setJournal(value); setJournalError(null); }).catch((error) => setJournalError(errorText(error)));
-  }, [api]);
+  }, [api, turbine]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -93,10 +100,17 @@ export default function Live({ api, active }) {
         <section className="issue">
           <header className="issue-head">
             <div>
-              <h1>Прогноз ВЭС на ближайшие 48 часов</h1>
+              <h1>Прогноз {turbine === 'plant' ? 'ВЭС' : `турбины ${turbine}`} на ближайшие 48 часов</h1>
               <p className="issue-sub">
                 {forecast ? <span title={`версия ${forecast.version}`}>Сделан {localFromUtc(forecast.issue_time_utc)} по Астане · 48 часов{forecast.version > 1 ? ' · пересчитан после нового прогноза погоды' : ''}</span> : 'Open-Meteo Forecast, последний опубликованный прогон'}
               </p>
+            </div>
+            <div className="seg" role="radiogroup" aria-label="Объект" id="live-turbine-switch">
+              {TURBINES.map((item) => (
+                <button key={item.key} type="button" role="radio" aria-checked={turbine === item.key} className={turbine === item.key ? 'on' : ''} onClick={() => setTurbine(item.key)}>
+                  {item.label}
+                </button>
+              ))}
             </div>
           </header>
           {forecast?.change_note && <p className="change-note">Пересчёт после нового прогноза погоды: {String(forecast.change_note).replace(/\s*против v\d+/, '')}.</p>}
