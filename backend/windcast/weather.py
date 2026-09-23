@@ -228,6 +228,32 @@ def fetch_training_weather(start_utc: str, end_utc: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _validate_live(data: list[dict], issue_time: datetime) -> None:
+    targets = pd.DatetimeIndex(live_times(issue_time)[1])
+    if len(data) != 2:
+        raise ValueError("Некорректный live-ответ Open-Meteo")
+    for site in data:
+        hourly = site.get("hourly") if isinstance(site, dict) else None
+        if not isinstance(hourly, dict) or any(
+            field not in hourly for field in (*BASE_FIELDS, "time")
+        ):
+            raise ValueError("Некорректный live-ответ Open-Meteo")
+        times = pd.to_datetime(hourly["time"], utc=True, errors="coerce")
+        if not times.is_unique or times.isna().any() or not targets.isin(times).all():
+            raise ValueError("Live-ответ не покрывает следующие 48 часов")
+        for field in BASE_FIELDS:
+            values = hourly[field]
+            if (
+                not isinstance(values, list)
+                or len(values) != len(times)
+                or any(
+                    not isinstance(value, (int, float)) or not math.isfinite(value)
+                    for value in values
+                )
+            ):
+                raise ValueError("Live-ответ содержит неполные признаки")
+
+
 def _fetch_live() -> dict:
     cache = _cache_path("live_latest.json")
     issue_time: datetime
@@ -248,10 +274,7 @@ def _fetch_live() -> dict:
         issue_time = fetched_at
         payload = response.json()
         data = payload if isinstance(payload, list) else [payload]
-        if len(data) != 2 or any(
-            not isinstance(site.get("hourly"), dict) for site in data
-        ):
-            raise ValueError("Некорректный live-ответ Open-Meteo")
+        _validate_live(data, issue_time)
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(
             json.dumps({"fetched_at": fetched_at.isoformat(), "data": data}),
@@ -264,8 +287,7 @@ def _fetch_live() -> dict:
             fetched_at = pd.to_datetime(stored["fetched_at"], utc=True).to_pydatetime()
             issue_time = datetime.now(timezone.utc)
             data = stored["data"]
-            if len(data) != 2:
-                raise ValueError
+            _validate_live(data, issue_time)
         except (
             OSError,
             KeyError,

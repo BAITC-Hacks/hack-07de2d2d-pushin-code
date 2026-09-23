@@ -101,6 +101,27 @@ def test_truncated_api_never_overwrites_valid_cache(
     pd.testing.assert_frame_equal(cached["hourly"], recovered["hourly"])
 
 
+def test_live_offline_without_snapshot_is_domain_error(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(weather.requests, "get", _offline)
+    with pytest.raises(weather.WeatherUnavailable):
+        weather.fetch_weather("live")
+
+
+def test_malformed_live_api_never_writes_snapshot(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        weather.requests,
+        "get",
+        lambda *args, **kwargs: _Response([{"hourly": {}}, {"hourly": {}}]),
+    )
+    with pytest.raises(weather.WeatherUnavailable):
+        weather.fetch_weather("live")
+    assert not (weather_root / "data" / "weather_cache" / "live_latest.json").exists()
+
+
 def test_test_only_fastapi_adapter_and_corrupt_cache(
     weather_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
