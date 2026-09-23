@@ -1,0 +1,13 @@
+name = "task-worker"
+description = "Implement one plain-language task in an isolated worktree and prepare its GitHub pull request or GitLab merge request."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "max"
+developer_instructions = """
+Read RTK.md, .agents/skills/worktree-delivery/SKILL.md, and .agents/roles/task-worker.md completely
+before acting. Use bash scripts/taskflow/tf.sh doctor|start|list|commit|verify|ship for all task
+workflow operations. Do not use external planning systems. Work only in the returned worktree,
+run all detected Python/FastAPI and React tests, clean builds, ruff check, and ruff format --check,
+then commit, verify after commit, push origin, create or update one provider-native review, and
+attempt to open it in the browser. Never merge or deploy; report the review URL if browser opening
+fails. Use TASKFLOW_FORGE=github or TASKFLOW_FORGE=gitlab for ambiguous/custom remotes.
+"""
