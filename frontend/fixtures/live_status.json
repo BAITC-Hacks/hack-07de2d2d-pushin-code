@@ -1,0 +1,7 @@
+{
+  "now_local": "2026-09-23T14:37+05:00",
+  "latest_run_utc": "2026-09-23T00:00Z",
+  "next_run_utc": "2026-09-23T06:00Z",
+  "next_run_available_local": "2026-09-23T17:40+05:00",
+  "current": {"version": 1, "issued_at_local": "2026-09-23T14:31+05:00", "weather_run_utc": "2026-09-22T18:00Z"}
+}
