@@ -229,22 +229,53 @@ def fetch_training_weather(start_utc: str, end_utc: str) -> pd.DataFrame:
 
 
 def _fetch_live() -> dict:
-    response = requests.get(
-        LIVE_URL,
-        params={
-            "latitude": LATITUDES,
-            "longitude": LONGITUDES,
-            "hourly": ",".join(BASE_FIELDS),
-            "timezone": "UTC",
-            "wind_speed_unit": "ms",
-        },
-        timeout=20,
-    )
-    response.raise_for_status()
-    fetched_at = datetime.now(timezone.utc)
-    payload = response.json()
-    data = payload if isinstance(payload, list) else [payload]
-    targets = pd.DatetimeIndex(live_times(fetched_at)[1])
+    cache = _cache_path("live_latest.json")
+    issue_time: datetime
+    try:
+        response = requests.get(
+            LIVE_URL,
+            params={
+                "latitude": LATITUDES,
+                "longitude": LONGITUDES,
+                "hourly": ",".join(BASE_FIELDS),
+                "timezone": "UTC",
+                "wind_speed_unit": "ms",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        fetched_at = datetime.now(timezone.utc)
+        issue_time = fetched_at
+        payload = response.json()
+        data = payload if isinstance(payload, list) else [payload]
+        if len(data) != 2 or any(
+            not isinstance(site.get("hourly"), dict) for site in data
+        ):
+            raise ValueError("Некорректный live-ответ Open-Meteo")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(
+            json.dumps({"fetched_at": fetched_at.isoformat(), "data": data}),
+            encoding="utf-8",
+        )
+        source = "api"
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        try:
+            stored = json.loads(cache.read_text(encoding="utf-8"))
+            fetched_at = pd.to_datetime(stored["fetched_at"], utc=True).to_pydatetime()
+            issue_time = datetime.now(timezone.utc)
+            data = stored["data"]
+            if len(data) != 2:
+                raise ValueError
+        except (
+            OSError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
+            raise WeatherUnavailable("Нет валидного live-кэша Open-Meteo") from error
+        source = "cache"
+    targets = pd.DatetimeIndex(live_times(issue_time)[1])
     sites = [
         {
             "hourly": {
@@ -261,14 +292,17 @@ def _fetch_live() -> dict:
         }
         for item in data[:2]
     ]
-    hourly = _rows({"data": sites}, targets, [1] * 48)
+    try:
+        hourly = _rows({"data": sites}, targets, [1] * 48)
+    except (KeyError, ValueError) as error:
+        raise WeatherUnavailable("Live-кэш не покрывает следующие 48 часов") from error
     hourly["init_time_utc"] = fetched_at
     return {
         "issue_date": "live",
-        "issue_time_utc": fetched_at,
+        "issue_time_utc": issue_time,
         "hourly": hourly,
         "runs": _runs(hourly),
-        "source": "api",
+        "source": source,
     }
 
 
