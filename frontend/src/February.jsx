@@ -31,6 +31,16 @@ export function issueStats(rows) {
   return { peak, low, mean };
 }
 
+// Mean width of the P10–P90 band over the window, as a plain-language confidence line.
+export function confidenceNote(rows) {
+  const valid = (rows || []).filter((row) => Number.isFinite(row?.p10) && Number.isFinite(row?.p90));
+  if (!valid.length) return null;
+  const width = (valid.reduce((sum, row) => sum + (row.p90 - row.p10), 0) / valid.length) * 100;
+  const level = width < 25 ? 'высокая' : width <= 50 ? 'средняя' : 'низкая';
+  const half = Math.round(width / 2);
+  return { level, half, text: `Уверенность прогноза: ${level} — в 8 случаях из 10 выработка попадёт в диапазон ±${half} п.п.` };
+}
+
 function signedPp(value) {
   if (!value) return 'без изменений';
   return `${value > 0 ? '+' : '−'}${Math.abs(value)} п.п.`;
@@ -254,6 +264,7 @@ export default function February({ api, active }) {
   const issue = issues.find((item) => item.issue_date === selected);
   const moment = nextDay(selected);
   const stats = useMemo(() => issueStats(current?.rows), [current]);
+  const confidence = useMemo(() => confidenceNote(current?.rows), [current]);
   const note = useMemo(() => recalcNote(current, previous), [current, previous]);
 
   return (
@@ -312,6 +323,7 @@ export default function February({ api, active }) {
               <div><span className="stat-v">Средняя {pct(stats.mean)}</span><span className="stat-l">за 48 часов</span></div>
             </div>
           )}
+          {confidence && <p className="note" title="Средняя ширина вероятного диапазона (P10–P90) за 48 часов">{confidence.text}</p>}
 
           {note && <p className="change-note">{note}</p>}
 
@@ -324,8 +336,8 @@ export default function February({ api, active }) {
                   <ForecastChart rows={current.rows} previousRows={previous?.rows || null} flags={current.flags} />
                 </div>
                 <div className="legend">
-                  <span><i className="lg-p50" />P50</span>
-                  <span><i className="lg-band" />коридор P10–P90</span>
+                  <span title="P50"><i className="lg-p50" />прогноз</span>
+                  <span title="С вероятностью 80 % выработка будет в этом диапазоне (P10–P90)"><i className="lg-band" />вероятный диапазон (80 %)</span>
                   {previous && <span><i className="lg-prev" />первый расчёт</span>}
                   <span><i className="lg-wind" />ветер</span>
                 </div>

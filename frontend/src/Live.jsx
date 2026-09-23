@@ -105,8 +105,8 @@ export default function Live({ api, active }) {
               <>
                 <ForecastChart rows={forecast.rows} flags={forecast.flags} />
                 <div className="legend">
-                  <span><i className="lg-p50" />P50</span>
-                  <span><i className="lg-band" />коридор P10–P90</span>
+                  <span title="P50"><i className="lg-p50" />прогноз</span>
+                  <span title="С вероятностью 80 % выработка будет в этом диапазоне (P10–P90)"><i className="lg-band" />вероятный диапазон (80 %)</span>
                   <span><i className="lg-wind" />ветер</span>
                 </div>
               </>

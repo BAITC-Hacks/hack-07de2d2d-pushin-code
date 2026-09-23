@@ -20,7 +20,7 @@ function HorizonChart({ points }) {
   const y = (v) => pad.t + (1 - v / top) * (height - pad.t - pad.b);
   const ticks = Array.from({ length: Math.round(top * 20) + 1 }, (_, i) => i * 0.05);
   return (
-    <svg className="mini-chart" viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Ошибка nMAE по горизонту прогноза">
+    <svg className="mini-chart" viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Средняя ошибка по горизонту прогноза">
       {ticks.map((t) => (
         <g key={t}>
           <line className="grid" x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} />
@@ -75,9 +75,9 @@ export default function Quality({ api, active }) {
 
         {derived && (
           <div className="kpis" id="quality-kpis">
-            <div className="kpi"><span className="kpi-v">{pct(derived.model?.nmae, 1)}</span><span className="kpi-l">nMAE модели — средняя ошибка в долях номинала</span></div>
+            <div className="kpi" title="nMAE"><span className="kpi-v">{pct(derived.model?.nmae, 1)}</span><span className="kpi-l">средняя ошибка модели в долях номинала</span></div>
             <div className="kpi"><span className="kpi-v">{derived.gain !== null ? `−${Math.round(derived.gain * 100)} %` : '—'}</span><span className="kpi-l">ошибки против лучшей базовой линии ({derived.best?.label?.toLowerCase()})</span></div>
-            <div className="kpi"><span className="kpi-v">{pct(metrics.coverage_p10_p90)}</span><span className="kpi-l">факта попало в коридор P10–P90 (цель — 80 %)</span></div>
+            <div className="kpi" title={`Прогноз честно оценивает свою неуверенность: факт попал в вероятный диапазон в ${pct(metrics.coverage_p10_p90)} часов (цель — 80 %). Технически — покрытие P10–P90.`}><span className="kpi-v">{pct(metrics.coverage_p10_p90)}</span><span className="kpi-l">часов факт попал в вероятный диапазон (цель — 80 %): прогноз честно оценивает свою неуверенность</span></div>
             <div className="kpi"><span className="kpi-v">{metrics.issues_count}</span><span className="kpi-l">выпусков в проверке</span></div>
           </div>
         )}
@@ -87,13 +87,12 @@ export default function Quality({ api, active }) {
             <section className="q-card">
               <h2>Модель против базовых линий</h2>
               <table className="methods">
-                <thead><tr><th>Метод</th><th className="num">nMAE</th><th className="num">nRMSE</th><th /></tr></thead>
+                <thead><tr><th>Метод</th><th className="num" title="nMAE">средняя ошибка</th><th /></tr></thead>
                 <tbody>
                   {metrics.methods.map((m) => (
                     <tr key={m.key} className={m.key === 'model' ? 'is-model' : ''}>
                       <td>{m.label}</td>
                       <td className="num">{pct(m.nmae, 1)}</td>
-                      <td className="num">{pct(m.nrmse, 1)}</td>
                       <td className="bar-cell"><span className="bar" style={{ width: `${(m.nmae / derived.worst) * 100}%` }} /></td>
                     </tr>
                   ))}
@@ -119,8 +118,8 @@ export default function Quality({ api, active }) {
             <h2>Неделя 15–21 января: прогноз против факта, ВЭС</h2>
             <ForecastChart rows={rows} showActual showWind={false} height={220} />
             <div className="legend">
-              <span><i className="lg-p50" />прогноз P50</span>
-              <span><i className="lg-band" />P10–P90</span>
+              <span title="P50"><i className="lg-p50" />прогноз</span>
+              <span title="С вероятностью 80 % выработка будет в этом диапазоне (P10–P90)"><i className="lg-band" />вероятный диапазон (80 %)</span>
               <span><i className="lg-actual" />факт</span>
             </div>
           </section>

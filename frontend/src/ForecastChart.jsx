@@ -80,7 +80,7 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
         width="100%"
         height={totalH}
         role="img"
-        aria-label="Прогноз мощности: медиана P50 и коридор P10–P90"
+        aria-label="Прогноз мощности и вероятный диапазон: с вероятностью 80 % выработка будет в нём"
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
@@ -148,13 +148,16 @@ export default function ForecastChart({ rows = [], previousRows = null, flags = 
         <div className="chart-tip" style={{ left: `${tipLeft * 100}%` }}>
           <div className="tip-time">
             {dayLabel(hovered.target_time_local)}, {hourLabel(hovered.target_time_local)}
-            {Number.isFinite(hovered.h) && <span>час {hovered.h}</span>}
+            {Number.isFinite(hovered.h) && <span>· через {hovered.h} ч после выпуска</span>}
           </div>
           <dl>
-            <dt>P50</dt><dd className="strong">{formatPercent(hovered.p50)}</dd>
-            <dt>коридор</dt><dd>{formatPercent(hovered.p10)} – {formatPercent(hovered.p90)}</dd>
-            {showActual && Number.isFinite(hovered.actual) && (<><dt>факт</dt><dd>{formatPercent(hovered.actual)}</dd></>)}
-            {showWind && Number.isFinite(hovered.wind_fc_ms) && (<><dt>ветер</dt><dd>{formatNumber(hovered.wind_fc_ms)} м/с</dd></>)}
+            <dt title="P50">Выработка</dt><dd className="strong">{formatPercent(hovered.p50)} номинала</dd>
+            <dt title="P10–P90: с вероятностью 80 % выработка будет в этом диапазоне">Вероятно</dt><dd>от {Math.round(hovered.p10 * 100)} до {formatPercent(hovered.p90)}</dd>
+            {showActual && Number.isFinite(hovered.actual) && (<><dt>Факт</dt><dd>{formatPercent(hovered.actual)}</dd></>)}
+            {showWind && Number.isFinite(hovered.wind_fc_ms) && (<><dt>Ветер</dt><dd>{formatNumber(hovered.wind_fc_ms)} м/с</dd></>)}
+            {showWind && Number.isFinite(hovered.temp_fc_c) && (
+              <><dt>Температура</dt><dd>{hovered.temp_fc_c < 0 ? '−' : ''}{formatNumber(Math.abs(hovered.temp_fc_c))} °C{hovered.temp_fc_c >= -3 && hovered.temp_fc_c <= 1 && <small className="tip-note">риск обледенения</small>}</dd></>
+            )}
           </dl>
         </div>
       )}

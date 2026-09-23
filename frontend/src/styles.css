@@ -266,6 +266,7 @@ main { padding: 20px 24px 48px; }
 .chart-tip dt { color: var(--muted); }
 .chart-tip dd { margin: 0; text-align: right; }
 .chart-tip dd.strong { font-weight: 600; color: var(--accent-ink); }
+.chart-tip .tip-note { display: block; font-size: 11px; color: var(--muted); }
 
 /* ── Agent panel ─────────────────────────── */
 .agent {
