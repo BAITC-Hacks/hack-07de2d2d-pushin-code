@@ -83,9 +83,7 @@ def build_feature_frame(
             # forecast features for the tail of the 48-hour archive window.
             frame["lag_days"] = np.floor((target - init).total_seconds() / 86_400)
         else:
-            frame["lag_days"] = [
-                timeline.lead_days(int(h)) for h in frame["h"]
-            ]
+            frame["lag_days"] = [timeline.lead_days(int(h)) for h in frame["h"]]
     else:
         frame["lag_days"] = lag_days
     frame["turbine_id"] = {"1": 1, "2": 2, "plant": 3}[turbine]

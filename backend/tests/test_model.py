@@ -30,10 +30,7 @@ def _weather() -> dict:
                 "wind_dir_deg": np.linspace(0, 350, 48),
                 "temp_c": np.linspace(-8, 4, 48),
                 "init_time_utc": [
-                    (
-                        target
-                        - pd.Timedelta(days=timeline.lead_days(h))
-                    ).floor("6h")
+                    (target - pd.Timedelta(days=timeline.lead_days(h))).floor("6h")
                     for h, target in enumerate(targets, start=1)
                 ],
             }

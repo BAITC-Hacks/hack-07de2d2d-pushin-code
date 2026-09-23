@@ -386,9 +386,7 @@ def _weather_runs(version: dict, issue: str, issue_time_utc: Any) -> list[dict]:
             else:
                 # Archived runs are usable only once published, not merely once
                 # their initialization timestamp is before T.
-                item["before_issue"] = timeline.published_before_issue(
-                    init, issue
-                )
+                item["before_issue"] = timeline.published_before_issue(init, issue)
         out.append(item)
     return out
 
