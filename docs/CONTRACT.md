@@ -1,4 +1,4 @@
-# Контракт · **v0.2 — черновик, не финал** · 23.09 14:50 · меняет только мастер
+# Контракт · **v0.3 — черновик, не финал** · 23.09 15:00 · меняет только мастер
 
 **Продукт:** агент диспетчера ВЭС. На каждую дату выпуска сам берёт архивный прогноз погоды,
 доступный на момент выпуска, считает почасовую выработку на 48 ч с интервалом P10–P90,
@@ -10,6 +10,8 @@
 Изменения v0.2: выпусков 29 (по 28.02 включительно) · погода сначала из API, кэш — запасной путь ·
 в феврале факта нет, SCADA в признаках не используется · ленты шагов агента сохраняются · API под UI (§6) ·
 экраны по макету (§9) · структура репозитория (§12).
+Изменения v0.3: внутренние интерфейсы между Кубой и Абылаем (§5.1) · запись выпуска `{D}.json` · форматы времени в CSV (§7) ·
+T4, T5 и фикстуры — Абылай · общие `windcast/paths.py` и `windcast/timeline.py` уже в main.
 
 ## 1. Время и выпуски
 - Внутри — только **UTC**. В файлах и на экране — местное **UTC+5** (Asia/Almaty после 01.03.2024).
@@ -37,7 +39,9 @@
 | `data/processed/hourly.parquet` | `ts_utc, turbine, wind_ms, power, temp_c, valid` | нет (генерится) |
 | `data/weather_cache/*.json` | ответы Open-Meteo | **да** — запасной путь без сети |
 | `models/*.pkl` | обученные модели | да (если < 20 МБ) |
-| `outputs/forecasts/{D}.csv` | выпуски | да, к сдаче |
+| `outputs/forecasts/{D}.csv` | выпуск, последняя версия (§7) | да, к сдаче |
+| `outputs/forecasts/{D}.json` | запись выпуска со всеми версиями — источник для API (§5.1) | да |
+| `outputs/metrics_jan.json` | метрики и ряды января — источник для «Качества» (§5.1) | да |
 | `outputs/traces/{D}.jsonl` | ленты шагов агента по схеме событий | да, к сдаче — доказательство, что выпуски сделал агент |
 | `outputs/live/` | live-выпуски | нет |
 
@@ -78,17 +82,61 @@
   окно — 48 ч от следующего полного часа. v1 — на предыдущем прогоне, пересчёт — когда вышел новый.
 - **Без `OPENAI_API_KEY`** — детерминированный режим: тот же порядок, анализ по шаблону, **те же числа**.
 - Лимит 8 шагов. След — строго по `docs/references/trace-event-schema.md`; `publish_forecast` → `type: action`.
+- **Кнопки в UI.** «↻ Перевыпустить агентом» (`trigger=issue`) — агент на глазах проходит весь цикл: v1 →
+  видит новый прогон → решает о v2. «⚡ Новый прогон погоды» (`trigger=new_weather_run`) — агент ищет прогон
+  свежее текущего и ≤ T; на архивном дне, где v2 уже учла последний прогон, честно отказывается.
 - **Поля `meta`, которые читает UI:** `tool`, `stage` (`weather|prep|model|forecast|analysis|recalc`),
   `status` (`ok|warn|skip|error`), `issue_date`, `version`, `source` (`api|cache`). Свободный текст
   «почему» — в `title`, детали — в `body`.
+
+## 5.1 Внутренние интерфейсы — чтобы ветки сливались без конфликтов
+**Общие модули (мастер, уже в main):** `windcast/paths.py` — все пути от `WINDCAST_ROOT` (по умолчанию корень
+репозитория); `windcast/timeline.py` — момент выпуска T, горизонт, даты выпусков, ISO-форматы. Свои пути и
+часовые пояса не заводить. Зависимости — `backend/requirements.txt` (есть всё нужное, версии зафиксированы).
+
+**Куба отдаёт** (`windcast/weather.py`, `windcast/data.py`, `windcast/model.py`):
+```python
+fetch_weather(issue_date: str, run: str = "latest") -> dict
+# issue_date: "2026-02-13" или "live"; run: "previous" (v1: previous_day2 на всё окно) | "latest" (previous_day1 для h ≤ 24)
+# {"issue_date": str, "issue_time_utc": datetime (UTC),
+#  "hourly": DataFrame[h, target_time_utc, wind_100m_ms, wind_10m_ms, wind_dir_deg, temp_c, init_time_utc] — 48 строк,
+#  "runs": [{"hours": "1-24", "model": "ecmwf_ifs025", "init_utc": "2026-02-13T00:00Z"}, {"hours": "25-48", ...}],
+#  "source": "api" | "cache"}
+check_data(issue_date: str, weather: dict) -> dict
+# {"ok": bool, "missing_hours": int, "runs_before_issue": bool, "notes": [str]}
+predict(issue_date: str, weather: dict) -> DataFrame
+# 144 строки: h, target_time_utc, turbine ("1" | "2" | "plant"), p10, p50, p90, wind_fc_ms, temp_fc_c
+MODEL_VERSION: str  # в model.py, например "lgbm-q-2026-01-31"
+```
+Плюс `outputs/metrics_jan.json` — ровно ответ `GET /api/metrics` (§6.6) и поле
+`"series": [{"target_time_local", "turbine", "p10", "p50", "p90", "actual"}]` за весь январь.
+
+**Абылай поверх:** `windcast/ports.py` берёт функции Кубы, а пока их нет — `windcast/_stubs.py` с тем же
+форматом и `source = "stub"` (видно в `/health` и в событиях; к freeze заглушек на главном пути быть не должно).
+```python
+agent.run_issue(issue_date: str, *, mode: str = "agent", trigger: str = "issue",
+                emit: Callable[[dict], None] = ...) -> dict
+# issue_date: "2026-02-13" или "live"; события — по схеме §5; ValueError → API 400
+# возвращает {"issue_date", "version", "record_path", "csv_path", "trace_path"}
+```
+**Запись выпуска** `outputs/forecasts/{D}.json` (live — `outputs/live/latest.json`) — единственный источник для API:
+```json
+{"issue_date": "2026-02-13", "issue_time_local": "2026-02-14T00:00+05:00", "issue_time_utc": "2026-02-13T19:00Z",
+ "latest_version": 2, "mode": "agent", "recorded_at": "2026-09-23T15:40+05:00",
+ "versions": {"1": {"version": 1, "created_at": "…", "weather_runs": [], "source": "api", "change_note": null,
+                    "summary": "…", "flags": [], "rows": []},
+              "2": {}}}
+```
+`rows` и `flags` — как в §6.2. `{D}.csv` — только последняя версия (§7). `traces/{D}.jsonl` — события последнего
+полного выпуска (`trigger = "issue"`), по одному JSON на строку.
 
 ## 6. API (backend, FastAPI, порт 8000) — всё, что нужно экрану
 
 **Общие правила.** JSON. Даты `YYYY-MM-DD`. Целевое время — ISO с `+05:00`, время прогонов — ISO с `Z`.
 Мощность — доля [0, 1]. Ошибки — `400`/`404` с `{"error": "текст по-русски"}`, **не 500**.
 Параметры в `?query` необязательны — без них разумное значение по умолчанию.
-**Фикстуры:** Куба кладёт по одному JSON на каждый ответ в `frontend/fixtures/` (имя = путь,
-например `forecasts_2026-02-13.json`) в первые 20 минут работы над T5. Сула работает против них, пока
+**Фикстуры:** Абылай (T5a) кладёт по одному JSON на каждый ответ в `frontend/fixtures/` (имя = путь,
+например `forecasts_2026-02-13.json`). Сула работает против них, пока
 бэкенда нет.
 
 ### 6.1 Календарь выпусков
@@ -156,15 +204,16 @@
 ## 7. Формат выпуска (CSV)
 `issue_date, issue_time_local, target_time_local, horizon_h, turbine, p10, p50, p90, wind_fc_ms, weather_init_max_utc, version`
 `turbine ∈ {1, 2, plant}`. 48 × 3 строк на выпуск. Плюс сводный `outputs/forecast_feb2026.csv` (29 выпусков).
+Время: `issue_time_local`, `target_time_local` — `2026-02-14T00:00+05:00`; `weather_init_max_utc` — `2026-02-13T00:00Z`.
+`target_time_local` — начало часа: h = 1 → (D+1) 00:00. Мощность — 4 знака после запятой.
 
 ## 8. CLI — для эксперта, без UI
-Запуск из корня репозитория:
+Запуск из корня репозитория, с `PYTHONPATH=backend` (или внутри контейнера):
 ```
 python -m windcast.backtest --from 2026-01-31 --to 2026-02-28   # 29 выпусков → outputs/forecasts/ + outputs/traces/
 python -m windcast.evaluate --from 2025-12-31 --to 2026-01-29   # метрики января
 python scripts/verify.py                                        # PASS/FAIL по проверкам
 ```
-(`backend/` в `PYTHONPATH` — через `pip install -e backend` или `docker compose run backend …`.)
 
 ## 9. Экраны (frontend, порт 3000, API по `/api/...`) — по макету `docs/ui-mockup.html`
 Открывается сразу рабочий экран, без обложки. Февраль уже посчитан. Тёмная тема «диспетчерская».
@@ -194,14 +243,18 @@ python scripts/verify.py                                        # PASS/FAIL по
 ## 10. Сквозной сценарий демо (3 минуты)
 1. Открываем `https://pushin.codes` — февраль уже посчитан, в календаре 29 выпусков.
 2. «▶ Воспроизвести февраль» (10 с) → кликаем 13.02 → «✓ Без будущего».
-3. «⚡ Новый прогон погоды» → агент пересчитывает на глазах, v1 уходит в пунктир. Второе нажатие — агент
-   отказывается: свежий прогон был бы из будущего.
+3. На дне с v2 — «↻ Перевыпустить агентом»: агент на глазах делает v1, видит новый прогон, пересчитывает → v2,
+   v1 уходит в пунктир. Затем «⚡ Новый прогон погоды» — агент отказывается: свежий прогон был бы из будущего.
 4. Live → «▶ Выпустить прогноз сейчас» — прогноз от текущего момента.
 5. «Качество» — модель обгоняет базовые линии на январе.
 
 ## 11. Владение и стек
-- `backend/` (Python 3.12, FastAPI, pandas, LightGBM или sklearn, openai), пакет `backend/windcast/`, `data/`,
-  `models/`, `outputs/` — **Куба**.
+- **Куба:** `windcast/config.py`, `data.py`, `weather.py`, `model.py`, `evaluate.py`, их тесты; `data/`, `models/`,
+  `outputs/metrics_jan.json`.
+- **Абылай:** `windcast/ports.py`, `_stubs.py`, `tools.py`, `agent.py`, `store.py`, `api.py`, `backtest.py`, их тесты;
+  `backend/Dockerfile`; `frontend/fixtures/`; `outputs/forecasts/`, `outputs/traces/`.
+- Общие (мастер): `windcast/__init__.py`, `paths.py`, `timeline.py`, `backend/requirements*.txt`, `backend/pyproject.toml`.
+  Нужна новая зависимость — одна строка в конец `requirements.txt` с `==`.
 - `frontend/` (стек на выбор; график — ECharts или аналог с полосой; SSE — `EventSource`) — **Сула**.
 - `docs/`, `README.md`, `scripts/verify.py`, `infra/`, корневой `docker-compose.yml` — **мастер**.
 - Версии зависимостей фиксировать (`requirements.txt` с `==`, lock-файл фронта). Секреты — только `.env`.
@@ -209,7 +262,8 @@ python scripts/verify.py                                        # PASS/FAIL по
 ## 12. Структура репозитория
 ```
 backend/            Куба · FastAPI + пакет windcast, порт 8000, Dockerfile собирается из корня
-  windcast/         config · data · weather · model · tools · agent · api · backtest · evaluate · live
+  windcast/         paths · timeline (общие) · config · data · weather · model · evaluate (Куба) ·
+                    ports · _stubs · tools · agent · store · api · backtest (Абылай)
   tests/
 frontend/           Сула · экраны §9, порт 3000
   fixtures/         JSON-ответы §6 до готовности бэкенда
