@@ -1,0 +1,1 @@
+- 2026-09-23 15:59 · fix-contract-v0.4-no-future-validation-so-weather-runs-are-accepted-only-when-in · [T2] enforce publication delay for archive and Live; [T8] add CSV and record boundary regressions
