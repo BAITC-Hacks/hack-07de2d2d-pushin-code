@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createApi, getFixtureMode } from './api';
+import ChatPanel from './ChatPanel';
 import February from './February';
 import Live from './Live';
 import Quality from './Quality';
@@ -130,6 +131,7 @@ export default function App() {
         <Quality api={api} active={tab === 'quality'} />
       </main>
 
+      <ChatPanel health={health} tab={tab} />
       <CheckDrawer open={drawer} onClose={() => setDrawer(false)} onShow={show} />
     </div>
   );
