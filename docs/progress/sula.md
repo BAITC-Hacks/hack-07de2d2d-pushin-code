@@ -1,0 +1,1 @@
+- 2026-09-23 16:31 · t6-t7-frontend · [T6][T7] Light dispatcher UI: February, Live, Quality, agent panel with SSE, 3-minute check; React build served by nginx
