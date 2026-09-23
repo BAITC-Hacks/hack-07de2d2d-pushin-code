@@ -98,7 +98,7 @@ export default function Quality({ api, active }) {
                   ))}
                 </tbody>
               </table>
-              <p className="note">Меньше — лучше; базовые линии: «завтра как вчера», среднее по часу и месяцу, паспортная кривая мощности.</p>
+              <p className="note">Меньше — лучше; базовые линии: «завтра как вчера», медиана по часу и месяцу, кривая мощности по истории SCADA.</p>
             </section>
 
             <section className="q-card">

@@ -80,6 +80,17 @@ export function recalcNote(current, previous) {
 }
 
 // «Спад −75 % за 4 ч · 14.02 03–07» from the backend text.
+// «14.02 18:00–09:00» crosses midnight: show the end date too («14.02 18:00 – 15.02 09:00»).
+function rangeWithEndDate(when) {
+  const match = /^(\d{2})\.(\d{2}) (\d{2}):00[–-](\d{2}):00$/.exec(String(when).trim());
+  if (!match) return when;
+  const [, day, month, from, to] = match;
+  if (Number(to) >= Number(from)) return when;
+  const end = new Date(Date.UTC(2026, Number(month) - 1, Number(day) + 1));
+  const endLabel = `${String(end.getUTCDate()).padStart(2, '0')}.${String(end.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${day}.${month} ${from}:00 – ${endLabel} ${to}:00`;
+}
+
 export function riskLine(flag) {
   const [what = '', when = ''] = String(flag?.text || '').split(' · ');
   let head = what;
@@ -87,7 +98,7 @@ export function riskLine(flag) {
   else if (flag?.kind === 'wind_gt20') head = what.replace(/\s*—.*$/, '').replace(/^ветер/, 'Ветер');
   else if (flag?.kind === 'models_diverge') head = what.replace(/^погодные модели расходятся/, 'Модели расходятся');
   else head = what.charAt(0).toUpperCase() + what.slice(1);
-  return { head: head.trim(), range: when.replace(/(\d{2}):00/g, '$1').trim() };
+  return { head: head.trim(), range: rangeWithEndDate(when).replace(/(\d{2}):00/g, '$1').trim() };
 }
 
 function Calendar({ issues, selected, onSelect, playing }) {
