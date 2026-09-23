@@ -133,7 +133,7 @@ function Provenance({ forecast }) {
             стартовавшие не позже чем за 8 часов до выпуска.
           </p>
           <table>
-            <thead><tr><th>Часы</th><th>Модель</th><th>Старт прогона</th><th>Доступен с</th><th /></tr></thead>
+            <thead><tr><th>Часы</th><th>Модель</th><th>Старт прогона, не позже</th><th>Доступен с</th><th /></tr></thead>
             <tbody>
               {forecast.weather_runs.map((run) => {
                 const ok = weatherRunIsBeforeIssue(run, Date.parse(issueUtc));
@@ -150,6 +150,7 @@ function Provenance({ forecast }) {
               })}
             </tbody>
           </table>
+          <p className="note">Архив Open-Meteo хранит прогноз по суткам давности, поэтому указана верхняя граница старта прогона; модель погоды — best_match (ECMWF / ICON / GFS по выбору сервиса)</p>
         </div>
       )}
     </div>
@@ -364,11 +365,11 @@ export default function February({ api, active }) {
           <div className="actions" id="issue-actions">
             <a className="btn ghost" href={api.csvUrl(selected)} download>⬇ CSV выпуска</a>
             <span className="spacer" />
-            <button type="button" className="btn" id="btn-reissue" disabled={agent.running || playing} onClick={() => runAgent('issue')}>
-              ↻ Перевыпустить агентом
+            <button type="button" className="btn" id="btn-reissue" title="агент проходит весь цикл вживую на выбранный день" disabled={agent.running || playing} onClick={() => runAgent('issue')}>
+              ↻ Запустить агента на этот день
             </button>
-            <button type="button" className="btn" id="btn-new-run" disabled={agent.running || playing} onClick={() => runAgent('new_weather_run')}>
-              Новый прогон погоды
+            <button type="button" className="btn" id="btn-new-run" title="агент ищет более свежий прогон погоды, опубликованный до момента выпуска; на архивном дне его нет — агент откажет" disabled={agent.running || playing} onClick={() => runAgent('new_weather_run')}>
+              Проверить правило „без будущего“
             </button>
           </div>
         </section>
@@ -380,7 +381,7 @@ export default function February({ api, active }) {
         caption={agent.caption}
         error={agent.error}
         summary={!agent.running ? current?.summary : null}
-        idleHint="Выберите день или нажмите «Перевыпустить агентом» — шаги агента появятся здесь."
+        idleHint="Выберите день или нажмите «Запустить агента на этот день» — шаги агента появятся здесь."
       />
     </div>
   );

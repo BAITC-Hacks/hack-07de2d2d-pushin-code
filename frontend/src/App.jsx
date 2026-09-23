@@ -8,7 +8,7 @@ import Quality from './Quality';
 const TABS = [
   { key: 'february', label: 'Февраль 2026', note: 'тест' },
   { key: 'live', label: 'Live', note: 'сейчас' },
-  { key: 'quality', label: 'Качество', note: 'январь' },
+  { key: 'quality', label: 'Точность', note: 'проверка на январе' },
 ];
 
 const CHECKS = [
@@ -17,11 +17,11 @@ const CHECKS = [
   { need: 'Повторить прогноз за весь тестовый период', where: '29 выпусков 31.01–28.02 и «Воспроизвести февраль»', tab: 'february', target: 'calendar' },
   { need: 'Без данных из будущего', where: '«Без будущего» — какие прогоны погоды взяты и когда они вышли', tab: 'february', target: 'no-future' },
   { need: 'Агент сам проходит этапы: погода → подготовка → модель → прогноз → анализ → пересчёт', where: 'Панель агента справа', tab: 'february', target: 'agent-stages' },
-  { need: 'Пересчёт при обновлении погоды', where: '«Перевыпустить агентом» и «Новый прогон погоды»', tab: 'february', target: 'issue-actions' },
+  { need: 'Пересчёт при обновлении погоды', where: '«Запустить агента на этот день» и «Проверить правило „без будущего“»', tab: 'february', target: 'issue-actions' },
   { need: 'Анализ результата и сводка для диспетчера', where: 'Риски в окне и сводка под лентой агента', tab: 'february', target: 'agent-panel' },
   { need: 'Результат в CSV', where: 'Кнопка «CSV выпуска» и все 29 выпусков одним файлом', tab: 'february', target: 'issue-actions' },
   { need: 'Работа на текущих данных', where: 'Вкладка Live и журнал агента', tab: 'live', target: 'live-status' },
-  { need: 'Точность против базовых линий', where: 'Вкладка «Качество», январь', tab: 'quality', target: 'quality-kpis' },
+  { need: 'Точность против базовых линий', where: 'Вкладка «Точность · проверка на январе»', tab: 'quality', target: 'quality-kpis' },
 ];
 
 function tabFromHash() {
