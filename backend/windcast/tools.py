@@ -455,15 +455,41 @@ def change_note(wind_shift: float, jump: dict | None, base: int) -> str:
     return f"{note} против v{base}"
 
 
-def _risk_phrase(flag: dict) -> str:
-    text = flag["text"]
-    if flag["kind"] == "ramp":
-        return text + (
-            " — держать резерв" if text.startswith("спад") else " — учесть в заявке"
-        )
-    if flag["kind"] == "ice":
-        return text + " — возможны потери"
-    return text
+_GROUPED = {
+    "ice": ("обледенение", "возможны потери"),
+    "wind_gt20": ("ветер выше 20 м/с", "возможна остановка турбин"),
+    "models_diverge": ("погодные модели расходятся", "неопределённость выше"),
+}
+
+
+def risk_digest(version: Version, per_kind: int = 2) -> str:
+    """Risks for the dispatcher, grouped by kind: what, when, what to do."""
+    flags = version.flags or []
+    if not flags:
+        return ""
+    plant = plant_rows(version.frame)
+    times = dict(zip(plant["h"].astype(int), plant["target_time_utc"]))
+
+    def hours(flag: dict) -> str:
+        end = to_utc(times[flag["to_h"]]) + pd.Timedelta(hours=1)
+        end_text = end.tz_convert(timeline.LOCAL_TZ).strftime("%H:%M")
+        return f"{local_label(times[flag['from_h']])}–{end_text}"
+
+    parts = []
+    ramps = [f for f in flags if f["kind"] == "ramp"]
+    for flag in ramps[:per_kind]:
+        what = flag["text"].split(" · ")[0]
+        advice = "держать резерв" if what.startswith("спад") else "учесть в заявке"
+        parts.append(f"{what} около {local_label(times[flag['from_h']])} — {advice}")
+    if len(ramps) > per_kind:
+        parts.append(f"ещё рамп: {len(ramps) - per_kind}")
+    for kind, (word, advice) in _GROUPED.items():
+        group = [f for f in flags if f["kind"] == kind]
+        if group:
+            more = f" и ещё {len(group) - per_kind}" if len(group) > per_kind else ""
+            spans = ", ".join(hours(f) for f in group[:per_kind])
+            parts.append(f"{word} {spans}{more} — {advice}")
+    return "; ".join(parts)
 
 
 def summary_text(version: Version) -> str:
@@ -476,12 +502,8 @@ def summary_text(version: Version) -> str:
             f"в среднем за 48 ч — {stats['mean_pct']} %."
         )
     ]
-    risks = [_risk_phrase(f) for f in version.flags or []]
-    if risks:
-        more = f" и ещё {len(risks) - 3}" if len(risks) > 3 else ""
-        parts.append("Риски: " + "; ".join(risks[:3]) + more + ".")
-    else:
-        parts.append("Рисков не найдено.")
+    risks = risk_digest(version)
+    parts.append(f"Риски: {risks}." if risks else "Рисков не найдено.")
     if version.change_note:
         parts.append(f"Пересчитано на свежем прогоне: {version.change_note}.")
     return " ".join(parts)
@@ -981,20 +1003,30 @@ class ToolRegistry:
         title = decision_title(ctx.facts, recalc, number, ctx.live)
         facts = ctx.facts or {}
         lines = []
+        detail = ""
+        if facts and not facts.get("all_inits_before_issue", True):
+            late = ctx.unpublished(ctx.weathers["latest"]["hourly"]["init_time_utc"])
+            if late:
+                detail = late_run_text(max(late), ctx.limit_time())
+        elif facts and not facts.get("fresher_than_current"):
+            detail = no_fresher_text(ctx)
+        if detail:
+            detail = detail[0].upper() + detail[1:] + "."
+            lines.append(detail)
         if reason:
             lines.append(reason)
         if facts:
             fresh = facts.get("new_flags_vs_current") or []
             lines.append(
                 "Факты: прогон свежее текущего — "
-                f"{'да' if facts.get('fresher_than_current') else 'нет'}; все init до T — "
+                f"{'да' if facts.get('fresher_than_current') else 'нет'}; опубликован до T — "
                 f"{'да' if facts.get('all_inits_before_issue') else 'нет'}; средний сдвиг "
                 f"ветра за часы 1–24 — {fmt1(facts.get('mean_abs_wind_shift_h1_24_ms') or 0)}"
                 f" м/с; новых рисков — {len(fresh)}."
             )
         if by == "rule":
             lines.append(
-                "Политика: пересчёт, если прогон свежее текущего, вышел до T и средний сдвиг "
+                "Политика: пересчёт, если прогон свежее текущего, опубликован до T и средний сдвиг "
                 "ветра за часы 1–24 больше 0,5 м/с или появился новый риск."
             )
         ctx.decision = {
@@ -1002,6 +1034,7 @@ class ToolRegistry:
             "by": by,
             "reason": reason or title,
             "title": title,
+            "detail": detail,
         }
         self.tracer.event(
             "thought",
@@ -1190,7 +1223,7 @@ class ToolRegistry:
                 t: pct(frame.loc[frame["turbine"] == t, "p50"].mean()) for t in TURBINES
             },
         }
-        body = f"Модель {model_version}, прогон previous. {_stats_text(stats)}."
+        body = f"Модель {model_version}, прогон previous. {_stats_text(stats)}"
         if touched:
             body += (
                 f" Поправлено строк (обрезка в [0, 1], порядок квантилей): {touched}."
@@ -1282,9 +1315,9 @@ class ToolRegistry:
             },
         }
         ctx.recalcs.append(result)
-        risks = "; ".join(f["text"] for f in analysis["flags"]) or "рисков не найдено"
+        risks = risk_digest(candidate) or "не найдено"
         body = (
-            f"Модель {result['model_version']} на свежем прогоне. {_stats_text(analysis['plant'])}."
+            f"Модель {result['model_version']} на свежем прогоне. {_stats_text(analysis['plant'])}"
             f" Риски: {risks}."
         )
         if touched:

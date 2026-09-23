@@ -179,14 +179,13 @@ def _intro(ctx: tools.RunContext, tracer: tools.Tracer, mode: str) -> None:
         return
     if ctx.live:
         title = "Live-выпуск: момент выпуска T — сейчас"
-        moment = f"T = {timeline.iso_local(ctx.issue_time_utc)}"
+        moment = f"T = {tools.local_label(ctx.issue_time_utc)} местного"
     else:
-        title = (
-            f"Выпуск на {tools.local_label(ctx.issue_time_utc)[:5]}: только погода до T"
-        )
+        day = timeline.parse_issue_date(ctx.issue_date).strftime("%d.%m")
+        title = f"Выпуск {day}: беру только погоду, опубликованную до T"
         moment = (
-            f"T = {timeline.iso_local(ctx.issue_time_utc)} "
-            f"({timeline.iso_utc(ctx.issue_time_utc)})"
+            f"T = {tools.local_label(ctx.issue_time_utc)} местного "
+            f"({tools.utc_label(ctx.issue_time_utc)})"
         )
     tracer.event(
         "thought",
@@ -203,8 +202,8 @@ def _announce_new_run(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
     tracer.event(
         "thought",
         "Событие: вышел новый прогон погоды",
-        f"v{ctx.latest_version} опубликована. Проверяю, есть ли прогон свежее, вышедший до "
-        "момента выпуска, и насколько он меняет ветер и риски.",
+        f"v{ctx.latest_version} опубликована. Проверяю, есть ли прогон свежее, опубликованный "
+        "до момента выпуска, и насколько он меняет ветер и риски.",
         stage="recalc",
         version=ctx.latest_version,
         source=ctx.event_source(),
@@ -553,9 +552,7 @@ def _verdict(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
         if made:
             title = f"Итог: опубликована v{number} — пересчёт на свежем прогоне"
         elif refused:
-            title = (
-                f"Итог: опубликована v{number}, пересчёт отклонён — {refused['error']}"
-            )
+            title = f"Итог: опубликована v{number}, пересчёт отклонён кодом"
         else:
             title = f"Итог: опубликована v{number} — {keep}"
         status = "ok"
@@ -563,7 +560,7 @@ def _verdict(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
         title = f"Итог: опубликована v{number} на новом прогоне"
         status = "ok"
     elif refused:
-        title = f"Итог: отказ — {refused['error']}; v{number} остаётся"
+        title = f"Итог: отказ — v{number} остаётся"
         status = "skip"
     else:
         title = f"Итог: v{number} остаётся — {keep}"
@@ -571,6 +568,9 @@ def _verdict(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
     parts = [version.summary or tools.summary_text(version)]
     if made and version.change_note and version.change_note not in parts[0]:
         parts.append(f"Что изменилось: {version.change_note}.")
+    reason = refused["error"] if refused else (ctx.decision or {}).get("detail")
+    if not made and reason:
+        parts.insert(0, f"{reason[0].upper()}{reason[1:].rstrip('.')}.")
     tracer.event(
         "verdict",
         title,
