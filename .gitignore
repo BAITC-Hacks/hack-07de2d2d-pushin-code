@@ -16,3 +16,4 @@ brag-output*/
 data/processed/*
 !data/processed/.gitkeep
 outputs/live/
+.DS_Store
