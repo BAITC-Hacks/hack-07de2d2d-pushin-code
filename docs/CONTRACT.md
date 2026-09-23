@@ -1,4 +1,4 @@
-# Контракт · **v0.5 — черновик, не финал** · 23.09 15:45 · меняет только мастер
+# Контракт · **v0.6 — черновик, не финал** · 23.09 16:50 · меняет только мастер
 
 **Продукт:** агент диспетчера ВЭС. На каждую дату выпуска сам берёт архивный прогноз погоды,
 доступный на момент выпуска, считает почасовую выработку на 48 ч с интервалом P10–P90,
@@ -215,6 +215,20 @@ agent.run_issue(issue_date: str, *, mode: str = "agent", trigger: str = "issue",
   `{"period", "issues_count", "coverage_p10_p90", "methods": [{"key": "model | power_curve | climatology | persistence", "label", "nmae", "nrmse"}], "by_horizon": [{"h", "model", "power_curve"}]}`
 - `GET /api/metrics/series?from=2026-01-15&to=2026-01-21&turbine=plant` →
   `[{"target_time_local", "p10", "p50", "p90", "actual"}]` — для графика «прогноз против факта».
+
+### 6.8 Чат диспетчера «Спросить агента» (v0.6, делается до 17:20, вливается только если готово)
+`POST /api/ask` `{"question": "Когда пик 14 февраля?", "issue_date": "2026-02-13" | "live" | null}` →
+```json
+{"answer": "Пик 98 % номинала — 15.02 в 16:00 …", "mode": "agent | deterministic",
+ "tools": [{"name": "get_issue_summary", "args": {"issue_date": "2026-02-13"}}], "issue_date": "2026-02-13"}
+```
+- Вопрос 1–500 символов, иначе 400. `issue_date` — выбранный на экране выпуск, может быть `null`.
+- LLM отвечает **только по данным из инструментов** (только чтение): `get_issue_summary(issue_date)`,
+  `get_hours(issue_date, from_h, to_h, turbine)` (≤ 12 часов), `get_weather_runs(issue_date)`, `get_agent_steps(issue_date)`,
+  `get_quality()`, `get_live()`. Ответ по-русски, до 3 предложений, с датами и часами. Нет данных — так и говорит.
+- Без ключа (`mode = deterministic`): ответ — сводка и риски выбранного выпуска и фраза «без ключа OpenAI отвечаю сводкой».
+- Таймаут 30 с → 503 `{"error": "…"}`. Файлы не пишет.
+- `/health` добавляет `"ask": true`, когда эндпоинт есть. **Фронтенд показывает чат только при `ask: true`.**
 
 ### 6.7 Служебные
 `GET /health` → `{"ok": true, "mode": "agent | deterministic", "model_version": "…", "issues_ready": 29}`
