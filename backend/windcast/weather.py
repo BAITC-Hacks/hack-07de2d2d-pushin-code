@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import requests
@@ -50,13 +52,17 @@ def _validate(payload: object) -> dict:
         or len(payload["data"]) != 2
     ):
         raise ValueError("Некорректный ответ Open-Meteo")
-    url = str(payload.get("url", ""))
-    if url and (
-        "previous-runs-api.open-meteo.com" not in url
-        or "timezone=UTC" not in url
-        or "wind_speed_unit=ms" not in url
-        or "43.645150" not in url
-        or "78.535604" not in url
+    parsed = urlparse(str(payload.get("url", "")))
+    query = parse_qs(parsed.query)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "previous-runs-api.open-meteo.com"
+        or parsed.path != "/v1/forecast"
+        or query.get("latitude") != [LATITUDES]
+        or query.get("longitude") != [LONGITUDES]
+        or query.get("timezone") != ["UTC"]
+        or query.get("wind_speed_unit") != ["ms"]
+        or query.get("models", [MODEL]) != [MODEL]
     ):
         raise ValueError("Кэш Open-Meteo не совпадает с заданным источником")
     for site in payload["data"]:
@@ -70,7 +76,10 @@ def _validate(payload: object) -> dict:
                 if (
                     not isinstance(values, list)
                     or len(values) != size
-                    or any(value is None for value in values)
+                    or any(
+                        not isinstance(value, (int, float)) or not math.isfinite(value)
+                        for value in values
+                    )
                 ):
                     raise ValueError("В кэше Open-Meteo есть неполные признаки")
     return payload
@@ -172,6 +181,8 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
     targets = pd.DatetimeIndex(target_times_utc(issue_date))
     try:
         payload = _request_previous(str(targets[0].date()), str(targets[-1].date()))
+        lags = [2] * 48 if run == "previous" else [1] * 24 + [2] * 24
+        hourly = _rows(payload, targets, lags)
         cache = _cache_path(
             f"previous_{targets[0]:%Y-%m-%d}_{targets[-1]:%Y-%m-%d}.json"
         )
@@ -181,8 +192,8 @@ def fetch_weather(issue_date: str, run: str = "latest") -> dict:
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         payload = _cached_previous(targets)
         source = "cache"
-    lags = [2] * 48 if run == "previous" else [1] * 24 + [2] * 24
-    hourly = _rows(payload, targets, lags)
+        lags = [2] * 48 if run == "previous" else [1] * 24 + [2] * 24
+        hourly = _rows(payload, targets, lags)
     if not (hourly["init_time_utc"] <= issue).all():
         raise WeatherUnavailable("Прогон погоды новее момента выпуска")
     return {
@@ -250,3 +261,22 @@ def _fetch_live() -> dict:
         "runs": _runs(hourly),
         "source": "api",
     }
+
+
+def fetch_historical_diagnostic(start_date: str, end_date: str) -> dict:
+    """Fetch Historical Forecast only for diagnostics; callers must not model on it."""
+    response = requests.get(
+        "https://historical-forecast-api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": LATITUDES,
+            "longitude": LONGITUDES,
+            "start_date": start_date,
+            "end_date": end_date,
+            "hourly": ",".join(BASE_FIELDS),
+            "timezone": "UTC",
+            "wind_speed_unit": "ms",
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    return {"source": "api", "kind": "diagnostic_only", "data": response.json()}
