@@ -1,0 +1,1 @@
+- 2026-09-23 15:09 · t1-hourly-scada · [T1] Validated UTC hourly SCADA parquet, strict check_data, stacked taskflow base receipts; committed and verified.
