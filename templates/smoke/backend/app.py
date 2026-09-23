@@ -1,6 +1,8 @@
 """Smoke-test backend: no dependencies, just enough to prove the deploy path works.
 Replace with the real service on the day — the only contract it keeps is GET /health."""
-import json, os
+
+import json
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -17,8 +19,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._json(200, {"ok": True})
         elif self.path.startswith("/api/"):
-            self._json(200, {"smoke": True, "path": self.path,
-                             "openai_key_present": bool(os.environ.get("OPENAI_API_KEY"))})
+            self._json(
+                200,
+                {
+                    "smoke": True,
+                    "path": self.path,
+                    "openai_key_present": bool(os.environ.get("OPENAI_API_KEY")),
+                },
+            )
         else:
             self._json(404, {"error": "not found", "path": self.path})
 
