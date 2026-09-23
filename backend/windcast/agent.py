@@ -234,8 +234,9 @@ def _next_step(ctx: tools.RunContext) -> tuple[str, dict] | None:
         if check is None:
             return "check_data", {"run": "previous"}
         if not check["ok"]:
-            ctx.failed = "погода не прошла проверку: " + "; ".join(check["notes"])
-            return None
+            return "fail", {
+                "reason": "погода не прошла проверку: " + "; ".join(check["notes"])
+            }
         if ctx.current is None:
             return "run_model", {}
     current = ctx.current
@@ -258,6 +259,8 @@ def _describe(step: tuple[str, dict] | None) -> str:
     if step is None:
         return "ничего"
     name, args = step
+    if name == "fail":
+        return "остановка: данные непригодны"
     return (
         "решение о пересчёте" if name == "decide" else f"{name}({args.get('run', '')})"
     )
@@ -275,6 +278,9 @@ def _drive(
         if name == "decide":
             registry.decide(tools.policy_recalc(ctx.facts), by="rule")
             continue
+        if name == "fail":
+            _fail(ctx, tracer, args["reason"], "check_data")
+            break
         if (
             name == "fetch_weather"
             and args.get("run") == "latest"
@@ -317,16 +323,7 @@ def _drive(
                 status="warn",
             )
             continue
-        ctx.failed = str(result.get("error") or f"{name} не прошёл")
-        tracer.event(
-            "error",
-            "Цикл остановлен: данные непригодны",
-            ctx.failed,
-            tool=name,
-            stage=tools.TOOLS[name]["result_stage"],
-            status="error",
-            version=ctx.event_version(),
-        )
+        _fail(ctx, tracer, str(result.get("error") or f"{name} не прошёл"), name)
         break
 
 
@@ -416,8 +413,7 @@ def _run_llm(
         kwargs["reasoning_effort"] = effort
     while True:
         if ctx.tool_calls >= MAX_TOOL_CALLS:
-            if _next_step(ctx) is not None:  # the cycle is complete: nothing to report
-                _limit_reached(ctx, tracer)
+            _limit_reached(ctx, tracer)
             return
         try:
             response = client.chat.completions.create(messages=messages, **kwargs)
@@ -482,7 +478,22 @@ def _exc(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"[:500]
 
 
+def _fail(ctx: tools.RunContext, tracer: tools.Tracer, reason: str, tool: str) -> None:
+    ctx.failed = reason
+    tracer.event(
+        "error",
+        "Цикл остановлен: данные непригодны",
+        reason,
+        tool=tool,
+        stage=tools.TOOLS[tool]["result_stage"],
+        status="error",
+        version=ctx.event_version(),
+    )
+
+
 def _limit_reached(ctx: tools.RunContext, tracer: tools.Tracer) -> None:
+    if _next_step(ctx) is None:  # the cycle is complete: an extra call is not an error
+        return
     tracer.event(
         "error",
         f"Лимит {MAX_TOOL_CALLS} шагов исчерпан — довожу цикл по регламенту",

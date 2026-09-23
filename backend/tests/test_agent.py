@@ -614,3 +614,52 @@ def test_ports_missing_module_falls_back_but_other_import_errors_propagate(monke
     monkeypatch.setattr(ports.importlib, "import_module", broken)
     with pytest.raises(ModuleNotFoundError, match="lightgbm"):
         ports.predict("2026-02-13", weather)
+
+
+def test_llm_recalc_before_v1_is_refused_and_not_taken_as_decision():
+    def eager(messages):
+        calls, _ = _history(messages)
+        if not calls:
+            return "Сразу пересчитаю.", [("recalc_forecast", {"reason": "сразу"})]
+        return dispatcher_policy()(messages)
+
+    events: list[dict] = []
+    result = agent.run_issue(
+        KEEP_DAY, mode="agent", emit=events.append, client=FakeClient(eager)
+    )
+    assert result["version"] == 1  # the early call must not force a v2 later
+    first = next(e for e in events if e["type"] == "tool_result")
+    assert first["meta"]["tool"] == "recalc_forecast"
+    assert first["meta"]["status"] == "error"
+    decision = _decisions(events)
+    assert len(decision) == 1 and decision[0]["meta"]["decision"] == "keep"
+
+
+def test_llm_bad_data_stops_with_error_and_verdict(monkeypatch):
+    real = _stubs.fetch_weather
+
+    def late(issue_date, run="latest"):
+        weather = real(issue_date, run)
+        weather["hourly"].loc[0, "init_time_utc"] = pd.Timestamp("2026-02-13T18:00Z")
+        return weather
+
+    monkeypatch.setattr(_stubs, "fetch_weather", late)
+
+    def stop_after_check(messages):
+        calls, _ = _history(messages)
+        if not calls:
+            return None, [("fetch_weather", {"run": "previous"})]
+        if calls == ["fetch_weather"]:
+            return None, [("check_data", {})]
+        return "Данные плохие, останавливаюсь.", []
+
+    events: list[dict] = []
+    result = agent.run_issue(
+        "2026-02-13",
+        mode="agent",
+        emit=events.append,
+        client=FakeClient(stop_after_check),
+    )
+    assert result["version"] is None
+    assert any(e["type"] == "error" and "непригодны" in e["title"] for e in events)
+    assert events[-1]["type"] == "verdict" and events[-1]["meta"]["status"] == "error"

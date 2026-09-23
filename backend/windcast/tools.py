@@ -943,7 +943,13 @@ class ToolRegistry:
             ctx.grounding.append(json.dumps(result, ensure_ascii=False))
             return result
         kwargs = {k: v for k, v in dict(args or {}).items() if k in spec["params"]}
-        if name == "recalc_forecast" and origin == "llm" and ctx.decision is None:
+        published = ctx.current is not None and ctx.current.published
+        if (
+            name == "recalc_forecast"
+            and origin == "llm"
+            and published
+            and ctx.decision is None
+        ):  # the LLM's own decision, traced before it acts
             self.decide(True, by="llm", reason=str(kwargs.get("reason") or ""))
         ctx.tool_calls += 1
         if name == "fetch_weather":
