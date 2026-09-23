@@ -13,3 +13,28 @@
 **Роли.** Абылай — мастер: контракт, доска, счёт, слияние, деплой, README, сдача; продуктовый код не пишет. Куба — backend по умолчанию. Сула — frontend по умолчанию. Умолчание переопределяется заявкой в доске.
 
 **Документы.** `docs/hackathon/criteria.md` · `playbook.md` · `cases-forecast.md` · `regulation.md`. `docs/references/` — готовые куски по желанию; обязательна только схема событий.
+
+## Локальная доставка задач
+
+`RTK.md` — каноническое руководство по приёму plain-language задач, изолированным worktree,
+проверкам, коммитам и review-доставке. Этот workflow не использует Jira или другую внешнюю
+систему планирования: текст задачи — единственный intake.
+
+Используй skill `worktree-delivery` для каждой задачи и роли `task-worker` и
+`delivery-reviewer`. Все операции Git/worktree, проверки, push и pull/merge-request выполняются
+через `bash scripts/taskflow/tf.sh` после того, как `doctor` подтвердит самостоятельный checkout
+с `origin`:
+
+```text
+bash scripts/taskflow/tf.sh doctor
+bash scripts/taskflow/tf.sh start
+bash scripts/taskflow/tf.sh list
+bash scripts/taskflow/tf.sh commit
+bash scripts/taskflow/tf.sh verify
+bash scripts/taskflow/tf.sh ship
+```
+
+`ship` отправляет ветку в `origin`, создаёт или обновляет ровно один GitHub pull request либо
+GitLab merge request, добавляет в тело задачи точные результаты всех проверок и пытается открыть
+URL в браузере. Слияние, approve и deploy запрещены; если браузер не открылся, URL всё равно
+выводится пользователю.

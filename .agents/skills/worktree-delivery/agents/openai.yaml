@@ -1,0 +1,4 @@
+interface:
+  display_name: "Worktree Delivery"
+  short_description: "Implement and ship a tested task from an isolated Git worktree"
+  default_prompt: "Use $worktree-delivery to implement this task in an isolated worktree, run all detected tests plus clean builds and Ruff checks, then create or update one GitHub PR or GitLab MR and open its URL."
