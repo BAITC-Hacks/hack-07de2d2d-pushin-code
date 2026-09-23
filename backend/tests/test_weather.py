@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -10,17 +9,34 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from windcast import weather
-from windcast.timeline import issue_time_utc, target_times_utc
+from windcast.timeline import issue_time_utc
 
 
 def _payload(start: str = "2026-02-13T19:00") -> dict:
-    times = pd.date_range(start, periods=48, freq="h", tz="UTC").strftime("%Y-%m-%dT%H:%M").tolist()
+    times = (
+        pd.date_range(start, periods=48, freq="h", tz="UTC")
+        .strftime("%Y-%m-%dT%H:%M")
+        .tolist()
+    )
     hourly = {"time": times}
-    for name, base in (("wind_speed_100m", 7.0), ("wind_speed_10m", 4.0), ("wind_direction_100m", 180.0), ("temperature_2m", -2.0)):
+    for name, base in (
+        ("wind_speed_100m", 7.0),
+        ("wind_speed_10m", 4.0),
+        ("wind_direction_100m", 180.0),
+        ("temperature_2m", -2.0),
+    ):
         for lag in (1, 2):
             hourly[f"{name}_previous_day{lag}"] = [base + lag] * 48
-    site = {"latitude": 43.62, "longitude": 78.47, "hourly_units": {"wind_speed_100m_previous_day1": "m/s"}, "hourly": hourly}
-    return {"url": weather.previous_runs_url("2026-02-13", "2026-02-15"), "data": [site, site]}
+    site = {
+        "latitude": 43.62,
+        "longitude": 78.47,
+        "hourly_units": {"wind_speed_100m_previous_day1": "m/s"},
+        "hourly": hourly,
+    }
+    return {
+        "url": weather.previous_runs_url("2026-02-13", "2026-02-15"),
+        "data": [site, site],
+    }
 
 
 @pytest.fixture
@@ -29,13 +45,21 @@ def weather_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_previous_lags_bounds_and_cache_fallback(weather_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_previous_lags_bounds_and_cache_fallback(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     payload = _payload()
-    monkeypatch.setattr(weather.requests, "get", lambda *args, **kwargs: _Response(payload))
+    monkeypatch.setattr(
+        weather.requests, "get", lambda *args, **kwargs: _Response(payload)
+    )
     latest = weather.fetch_weather("2026-02-13")
     assert latest["source"] == "api" and len(latest["hourly"]) == 48
-    assert latest["hourly"].loc[23, "init_time_utc"] == issue_time_utc("2026-02-13") - pd.Timedelta(hours=1)
-    assert latest["hourly"].loc[24, "init_time_utc"] == issue_time_utc("2026-02-13") - pd.Timedelta(hours=24)
+    assert latest["hourly"].loc[23, "init_time_utc"] == issue_time_utc(
+        "2026-02-13"
+    ) - pd.Timedelta(hours=1)
+    assert latest["hourly"].loc[24, "init_time_utc"] == issue_time_utc(
+        "2026-02-13"
+    ) - pd.Timedelta(hours=24)
     assert (latest["hourly"]["init_time_utc"] <= latest["issue_time_utc"]).all()
     monkeypatch.setattr(weather.requests, "get", _offline)
     cached = weather.fetch_weather("2026-02-13")
@@ -43,8 +67,12 @@ def test_previous_lags_bounds_and_cache_fallback(weather_root: Path, monkeypatch
     pd.testing.assert_frame_equal(latest["hourly"], cached["hourly"])
 
 
-def test_previous_keeps_two_run_groups_and_rejects_bad_input(weather_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(weather.requests, "get", lambda *args, **kwargs: _Response(_payload()))
+def test_previous_keeps_two_run_groups_and_rejects_bad_input(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get", lambda *args, **kwargs: _Response(_payload())
+    )
     previous = weather.fetch_weather("2026-02-13", run="previous")
     assert [run["hours"] for run in previous["runs"]] == ["1-24", "25-48"]
     assert previous["runs"][0]["init_utc"] < previous["runs"][1]["init_utc"]
@@ -54,8 +82,12 @@ def test_previous_keeps_two_run_groups_and_rejects_bad_input(weather_root: Path,
         weather.fetch_weather("2026-02-13", run="bad")
 
 
-def test_test_only_fastapi_adapter_and_corrupt_cache(weather_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(weather.requests, "get", lambda *args, **kwargs: _Response(_payload()))
+def test_test_only_fastapi_adapter_and_corrupt_cache(
+    weather_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get", lambda *args, **kwargs: _Response(_payload())
+    )
     app = FastAPI()
 
     @app.get("/_test/weather")
@@ -74,8 +106,12 @@ def test_test_only_fastapi_adapter_and_corrupt_cache(weather_root: Path, monkeyp
 def test_training_helper_uses_both_lags_from_valid_bulk(weather_root: Path) -> None:
     cache = weather_root / "data" / "weather_cache"
     cache.mkdir(parents=True)
-    (cache / "previous_runs_bulk.json").write_text(json.dumps(_payload()), encoding="utf-8")
-    training = weather.fetch_training_weather("2026-02-13T19:00:00Z", "2026-02-14T18:00:00Z")
+    (cache / "previous_runs_bulk.json").write_text(
+        json.dumps(_payload()), encoding="utf-8"
+    )
+    training = weather.fetch_training_weather(
+        "2026-02-13T19:00:00Z", "2026-02-14T18:00:00Z"
+    )
     assert len(training) == 48
     assert set(training["lag_days"]) == {1, 2}
     assert set(training["source"]) == {"cache"}
