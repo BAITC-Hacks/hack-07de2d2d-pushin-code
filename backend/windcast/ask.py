@@ -32,7 +32,9 @@ SYSTEM_PROMPT = """Ты — помощник диспетчера ВЭС. Отв
 конкретных часов, по нему нельзя судить о пике или минимуме всего выпуска.
 Про точность, ошибку, качество модели или надёжность прогноза вызывай get_quality: там ошибка
 (nMAE) модели и простых методов на январской проверке и доля часов, когда факт попал в вероятный
-диапазон. Факта за февраль нет — так и скажи, точность показана на январе."""
+диапазон. Факта за февраль нет — так и скажи, точность показана на январе.
+Пиши простыми словами: «средняя ошибка», «вероятный диапазон», проценты с запятой (15,8 %),
+без обозначений nMAE, P10, P50, P90 и без долей вида 0.1576."""
 
 
 class AskTimeout(TimeoutError):
@@ -327,6 +329,16 @@ def get_quality() -> dict[str, Any]:
             "found": True,
             "methods": data.get("methods") or [],
             "coverage_p10_p90": data.get("coverage_p10_p90"),
+            "readable": {
+                m.get("key"): f"{m.get('nmae', 0) * 100:.1f} %".replace(".", ",")
+                for m in data.get("methods") or []
+                if isinstance(m.get("nmae"), (int, float))
+            },
+            "coverage_readable": (
+                f"{data['coverage_p10_p90'] * 100:.0f} %"
+                if isinstance(data.get("coverage_p10_p90"), (int, float))
+                else None
+            ),
         }
     )
 
